@@ -1,0 +1,28 @@
+version: "3.8"
+
+services:
+  attacker:
+    image: nicolaka/netshoot
+    container_name: attacker
+    command: tail -f /dev/null
+    networks:
+      labnet:
+        ipv4_address: 192.101.0.57
+    # netshoot stays alive automatically
+
+  victim:
+    build:
+      context: .
+      dockerfile: Dockerfile.victim
+    container_name: victim
+    command: tail -f /dev/null
+    networks:
+      labnet:
+        ipv4_address: 192.101.0.56
+
+networks:
+  labnet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.101.0.0/24

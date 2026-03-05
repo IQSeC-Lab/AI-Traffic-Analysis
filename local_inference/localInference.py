@@ -9,10 +9,10 @@ import urllib.request
 # =========================
 # Configuration
 # =========================
-RUN_DURATION_MINUTES = 30
+RUN_DURATION_MINUTES = 2
 
-# MODEL = "Ramikan-BR/Qwen2-0.5B-v14"
-MODEL = "cobrokerai/llama-3-1-8b"
+MODEL = "Ramikan-BR/Qwen2-0.5B-v14"
+# MODEL = "cobrokerai/llama-3-1-8b"
 
 
 PROMPTS = [

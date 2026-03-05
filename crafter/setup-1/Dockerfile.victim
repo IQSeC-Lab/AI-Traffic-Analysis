@@ -1,0 +1,16 @@
+# Dockerfile.victim
+FROM python:3.11-slim
+
+# Install CPU-only PyTorch + torchvision
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
+
+# Tools for ping/curl
+RUN apt-get update && \
+    apt-get install -y iputils-ping curl netcat-openbsd && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY starter/ /app/
+
+
