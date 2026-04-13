@@ -1,0 +1,1 @@
+A farmer needs to cross a river with a fox, a chicken, and a bag of grain. The boat fits only the farmer and one item. The fox eats the chicken, and the chicken eats the grain if left alone. Describe the optimal crossing sequence.

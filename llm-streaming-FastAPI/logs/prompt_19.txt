@@ -1,0 +1,1 @@
+You have 12 balls, all identical in weight except one which is either heavier or lighter. Using a balance scale exactly 3 times, identify the odd ball and determine if it is heavier or lighter.

@@ -1,0 +1,1 @@
+In Python 3, what is the output of print tuple[0] if tuple = ( 'abcd', 786 , 2.23, 'john', 70.2 )? write python code 
