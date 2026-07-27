@@ -1,1 +1,0 @@
-Let x = 1. What is x << 3 in Python 3? write this in code and then answer.

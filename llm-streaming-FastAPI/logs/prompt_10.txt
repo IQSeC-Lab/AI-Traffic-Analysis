@@ -1,1 +1,0 @@
-Evaluate the following expression: 6 - (4 + 1).

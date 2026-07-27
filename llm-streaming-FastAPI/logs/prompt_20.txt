@@ -1,1 +1,0 @@
-Alice, Bob, and Carol each make one true and one false statement. Alice says: 'Bob is lying' and 'Carol is telling the truth.' Bob says: 'Alice is telling the truth' and 'Carol is lying.' Carol says: 'Alice is lying' and 'Bob is telling the truth.' Who is making which type of statement?
