@@ -1,0 +1,148 @@
+@import "tailwindcss";
+
+/* Design tokens. Chart colors follow the validated reference palette (dataviz skill):
+   categorical series 1-8, status colors, and chart chrome, stepped separately for dark mode. */
+:root {
+  color-scheme: light;
+  --page: #f4f4f1;
+  --surface: #fcfcfb;
+  --surface-2: #f3f2ee;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --ink-3: #898781;
+  --hairline: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.1);
+
+  /* Accent (chosen in Settings → Appearance; violet by default). --accent fills marks and
+     links; --accent-strong carries white text; --accent-wash is the pale background. */
+  --accent: #4a3aa7;
+  --accent-strong: #4a3aa7;
+  --accent-strong-hover: #3c2f8c;
+  --accent-wash: #efedfa;
+
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+  --good-text: #006300;
+  --critical-text: #b42f2f;
+
+  /* Decorative; dark enough in both modes for white text */
+  --brand-gradient: linear-gradient(135deg, #4a3aa7 0%, #7c3aa7 100%);
+}
+
+:root[data-accent="green"] {
+  --accent: #008300;
+  --accent-strong: #007400;
+  --accent-strong-hover: #006300;
+  --accent-wash: #e5f3e5;
+  --brand-gradient: linear-gradient(135deg, #0a7a3c 0%, #0f6e6e 100%);
+}
+:root[data-accent="blue"] {
+  --accent: #2a78d6;
+  --accent-strong: #256abf;
+  --accent-strong-hover: #1c5cab;
+  --accent-wash: #e6f0fc;
+  --brand-gradient: linear-gradient(135deg, #256abf 0%, #4a3aa7 100%);
+}
+:root[data-accent="mono"] {
+  --accent: #2c2c2a;
+  --accent-strong: #1f1f1d;
+  --accent-strong-hover: #3a3a37;
+  --accent-wash: #ecebe7;
+  --brand-gradient: linear-gradient(135deg, #1f1f1d 0%, #52514e 100%);
+}
+
+/* Dark theme. The theme is set on <html data-theme> before the first paint from the
+   choice in the sidebar or Settings (light, dark, or following the OS). */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --surface: #1a1a19;
+  --surface-2: #242422;
+  --ink: #ffffff;
+  --ink-2: #c3c2b7;
+  --ink-3: #898781;
+  --hairline: #2c2c2a;
+  --axis: #383835;
+  --border: rgba(255, 255, 255, 0.1);
+
+  --accent: #9085e9;
+  --accent-strong: #5a4ac4;
+  --accent-strong-hover: #6a5bd4;
+  --accent-wash: #1f1b3a;
+
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+
+  --good-text: #0ca30c;
+  --critical-text: #e66767;
+}
+:root[data-theme="dark"][data-accent="green"] {
+  --accent: #0ca30c;
+  --accent-strong: #007400;
+  --accent-strong-hover: #008300;
+  --accent-wash: #10240f;
+}
+:root[data-theme="dark"][data-accent="blue"] {
+  --accent: #3987e5;
+  --accent-strong: #256abf;
+  --accent-strong-hover: #2a78d6;
+  --accent-wash: #14243a;
+}
+:root[data-theme="dark"][data-accent="mono"] {
+  --accent: #d6d5ce;
+  --accent-strong: #3a3a37;
+  --accent-strong-hover: #4a4a46;
+  --accent-wash: #2a2a28;
+}
+
+@theme inline {
+  --color-page: var(--page);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-hairline: var(--hairline);
+  --color-axis: var(--axis);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-strong-hover: var(--accent-strong-hover);
+  --color-accent-wash: var(--accent-wash);
+  --color-good: var(--good);
+  --color-warning: var(--warning);
+  --color-serious: var(--serious);
+  --color-critical: var(--critical);
+  --color-good-text: var(--good-text);
+  --color-critical-text: var(--critical-text);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+@keyframes live-ping {
+  0% { transform: scale(1); opacity: 0.6; }
+  80%, 100% { transform: scale(2.4); opacity: 0; }
+}

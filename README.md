@@ -15,7 +15,8 @@ MaLLM/
 ├── 3-Temperature-change/   # Temperature-swept traffic capture
 ├── 4-crafted-prompts/      # Adversarial prompt injection traffic capture
 ├── 5-scalability/          # Cross-model fingerprinting experiment
-└── 6-Delay/                # Network delay/jitter robustness experiment
+├── 6-Delay/                # Network delay/jitter robustness experiment
+└── app/                    # Next.js (TS) frontend + FastAPI backend in app/api/
 ```
 
 ### 1-Model_downloader
