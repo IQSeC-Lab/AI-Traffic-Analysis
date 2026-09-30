@@ -2,17 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { List, Plus } from "lucide-react";
 
 export function ExperimentTabs({ base }: { base: string }) {
   const pathname = usePathname();
   const tabs = [
-    { href: base, label: "Runs", icon: List },
-    { href: `${base}/new`, label: "New run", icon: Plus },
+    { href: base, label: "Runs" },
+    { href: `${base}/new`, label: "New run" },
   ];
   return (
     <div className="mb-8 flex gap-1 border-b border-hairline">
-      {tabs.map(({ href, label, icon: Icon }) => {
+      {tabs.map(({ href, label }) => {
         const active = pathname === href;
         return (
           <Link
@@ -22,7 +21,6 @@ export function ExperimentTabs({ base }: { base: string }) {
               active ? "border-accent font-medium text-ink" : "border-transparent text-ink-3 hover:text-ink"
             }`}
           >
-            <Icon className="h-4 w-4" strokeWidth={1.75} />
             {label}
           </Link>
         );

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Box, Check, Cpu, Download, MessageSquareText, Play, Plus, SlidersHorizontal, Sparkles } from "lucide-react";
+import { Check } from "lucide-react";
 
 import {
   api,
@@ -24,13 +24,11 @@ import { PromptDialog } from "@/components/prompts/PromptDialog";
 const modelRef = (m: LocalModel) => m.model ?? m.folder;
 
 function Section({
-  icon: Icon,
   title,
   description,
   action,
   children,
 }: {
-  icon: typeof Box;
   title: string;
   description?: string;
   action?: ReactNode;
@@ -39,14 +37,9 @@ function Section({
   return (
     <section className="rounded-2xl border border-hairline bg-surface p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
       <div className="mb-4 flex items-start justify-between gap-3">
-        <div className="flex items-start gap-3">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-ink-2">
-            <Icon className="h-4 w-4" strokeWidth={1.75} />
-          </div>
-          <div>
-            <h2 className="text-sm font-semibold">{title}</h2>
-            {description && <p className="text-xs text-ink-3">{description}</p>}
-          </div>
+        <div>
+          <h2 className="text-sm font-semibold">{title}</h2>
+          {description && <p className="text-xs text-ink-3">{description}</p>}
         </div>
         {action}
       </div>
@@ -72,9 +65,9 @@ function SelectCard({
       role={role}
       aria-checked={selected}
       onClick={onClick}
-      className={`relative w-full rounded-xl border p-3 text-left transition-all ${
+      className={`relative w-full rounded-xl border p-3 text-left transition-colors ${
         selected
-          ? "border-accent bg-accent-wash/60 ring-4 ring-accent/10"
+          ? "border-accent bg-accent-wash/60"
           : "border-hairline hover:border-axis hover:bg-surface-2/50"
       }`}
     >
@@ -100,7 +93,9 @@ export function DataCollectorForm() {
   const [model, setModel] = useState("");
   const [gpuMode, setGpuMode] = useState<"auto" | "manual" | "cpu">("auto");
   const [gpus, setGpus] = useState<number[]>([]); // when choosing GPUs by hand
-  const [workers, setWorkers] = useState(1);
+  const [split, setSplit] = useState(false); // chosen GPUs: split one copy across them instead of one copy each
+  const [workers, setWorkers] = useState(1); // Auto, CPU, or split
+  const [perGpu, setPerGpu] = useState(1); // chosen GPUs, one copy each: workers on every GPU
   const [name, setName] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [repeat, setRepeat] = useState(1);
@@ -122,8 +117,9 @@ export function DataCollectorForm() {
         setSystem(sys);
         setModels(ready);
         setModel(ready[0] ? modelRef(ready[0]) : "");
-        setGpuMode(sys.gpus.length > 0 ? "auto" : "cpu");
-        setGpus(sys.gpus.length > 0 ? [sys.gpus[0].index] : []);
+        // Several GPUs: one copy of the model on each, dividing the prompts, unless the user picks otherwise
+        setGpuMode(sys.gpus.length > 1 ? "manual" : sys.gpus.length > 0 ? "auto" : "cpu");
+        setGpus(sys.gpus.map((g) => g.index));
         setPrompts(library.prompts);
         setSelected(new Set(library.prompts.map((p) => p.number)));
         setActiveRuns(active);
@@ -154,13 +150,23 @@ export function DataCollectorForm() {
     });
   }
 
+  const onGpu = gpuMode !== "cpu" && (system?.gpus.length ?? 0) > 0;
+  const splitting = onGpu && gpuMode === "manual" && split && gpus.length > 1;
+  const perGpuMode = onGpu && gpuMode === "manual" && !splitting;
+  // The API also caps workers at the number of captures: a worker without prompts would only hold memory
+  const workerCount = Math.max(
+    1,
+    Math.min(perGpuMode ? Math.max(1, gpus.length) * perGpu : workers, selected.size * Math.max(1, repeat)),
+  );
+
   async function start() {
     setStarting(true);
     setError(null);
     const config: Partial<RunConfig> = {
       model,
-      gpus: gpuMode === "auto" ? "auto" : gpuMode === "cpu" ? [] : gpus,
-      workers,
+      gpus: !onGpu ? [] : gpuMode === "auto" ? "auto" : gpus,
+      split_model: splitting,
+      workers: workerCount,
       name: name.trim() || null,
       prompts: selected.size === prompts.length ? null : [...selected].sort((a, b) => a - b),
       repeat: repeat > 1 ? repeat : null,
@@ -181,11 +187,28 @@ export function DataCollectorForm() {
 
   const total = selected.size * Math.max(1, repeat);
   const needMb = models.find((m) => modelRef(m) === model)?.gpu_memory_mb ?? null;
-  const onGpu = gpuMode !== "cpu" && system.gpus.length > 0;
-  const hardware = !onGpu ? "CPU" : gpuMode === "auto" ? "Auto GPU" : gpus.length ? `GPU ${gpus.join(", ")}` : "—";
-  // Workers slow each other down when they share a device (all on the CPU, or split over the same GPUs).
-  const sharedDevice = workers > 1 && (!onGpu || gpuMode === "manual");
   const gb = (mb: number) => `${(mb / 1024).toFixed(1)} GB`;
+  const hardware = !onGpu
+    ? "CPU"
+    : gpuMode === "auto"
+      ? "Auto GPU"
+      : gpus.length
+        ? `GPU ${gpus.join(", ")}${splitting ? " · split" : ""}`
+        : "—";
+  // How the captures are divided: worker k gets every n-th one, so shares differ by at most one.
+  const shares = Array.from({ length: workerCount }, (_, k) => Math.floor(total / workerCount) + (k < total % workerCount ? 1 : 0));
+  const shareText = shares.length && shares[0] !== shares[shares.length - 1] ? `${shares[shares.length - 1]}–${shares[0]}` : `${shares[0] ?? 0}`;
+  const workerWhere = (k: number) =>
+    !onGpu ? "CPU" : gpuMode === "auto" ? "GPU auto" : splitting ? `GPU ${gpus.join("+")}` : `GPU ${gpus[k % gpus.length]}`;
+  // Workers slow each other down when they share a device
+  const sharedDevice =
+    workerCount > 1 &&
+    (!onGpu || splitting || (perGpuMode && perGpu > 1) || (gpuMode === "auto" && workerCount > system.gpus.length));
+  // GPU memory each chosen GPU needs, and chosen GPUs the model can't fit on alone
+  const perGpuNeed = needMb == null ? null : perGpuMode ? needMb * perGpu : splitting ? (needMb * workerCount) / gpus.length : needMb;
+  const tooSmall = perGpuMode && needMb != null
+    ? system.gpus.filter((g) => gpus.includes(g.index) && g.memory_total_mb != null && needMb > g.memory_total_mb * 0.95)
+    : [];
   const canStart =
     system.docker.available && model && selected.size > 0 && !starting && !(onGpu && gpuMode === "manual" && gpus.length === 0);
   const selectedCategories = categories.filter(([, items]) => items.some((p) => selected.has(p.number))).length;
@@ -194,12 +217,11 @@ export function DataCollectorForm() {
     <div className="grid items-start gap-6 lg:grid-cols-[1fr_20rem]">
       <div className="space-y-6">
         <Section
-          icon={Box}
           title="Model"
           description="Models downloaded on this machine."
           action={
             <ButtonLink href="/settings#models" variant="secondary" size="sm">
-              <Download className="h-3.5 w-3.5" /> Download more
+              Download more
             </ButtonLink>
           }
         >
@@ -225,7 +247,10 @@ export function DataCollectorForm() {
           )}
         </Section>
 
-        <Section icon={Cpu} title="Hardware" description="Where the model runs, and how many copies of it work through the prompts in parallel.">
+        <Section
+          title="Hardware"
+          description="Where the model runs, and how many copies of it divide the prompts between them."
+        >
           {system.gpus.length === 0 ? (
             <Alert tone="warning">
               No NVIDIA GPU detected on this machine. The model runs on the CPU, which is very slow for large models.
@@ -243,8 +268,11 @@ export function DataCollectorForm() {
               />
               <p className="text-xs text-ink-3">
                 {gpuMode === "auto" &&
-                  "Each worker goes to the GPU with the most free memory. If none has room, the run waits in the queue and starts on its own."}
-                {gpuMode === "manual" && "Each worker splits the model across the GPUs you select. Select several to fit a large model."}
+                  "Workers are spread over the GPUs with free memory. If none has room, the run waits in the queue and starts on its own."}
+                {gpuMode === "manual" &&
+                  (splitting
+                    ? "Every worker's model is split across all the selected GPUs. Use this when the model doesn't fit on one GPU."
+                    : "Each selected GPU runs its own copy of the model, with its own containers, network and capture, and the prompts are divided between them.")}
                 {gpuMode === "cpu" && "Runs on the CPU. CPU runs go one at a time, so they don't slow each other down."}
               </p>
               {gpuMode !== "cpu" && (
@@ -283,31 +311,75 @@ export function DataCollectorForm() {
                 </div>
               )}
               {gpuMode === "manual" && gpus.length === 0 && <p className="text-xs text-critical-text">Select at least one GPU.</p>}
+              {gpuMode === "manual" && gpus.length > 1 && (
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span className="text-xs font-medium text-ink-2">Use the selected GPUs</span>
+                  <Segmented
+                    value={split ? "split" : "each"}
+                    onChange={(v) => setSplit(v === "split")}
+                    options={[
+                      { value: "each", label: "One copy per GPU" },
+                      { value: "split", label: "Split one copy across them" },
+                    ]}
+                  />
+                </div>
+              )}
+              {tooSmall.length > 0 && needMb != null && (
+                <Alert tone="warning">
+                  The model needs about {gb(needMb)}, more than GPU {tooSmall.map((g) => g.index).join(", ")} can hold on
+                  its own.{" "}
+                  {gpus.length > 1 ? (
+                    <button type="button" onClick={() => setSplit(true)} className="font-medium text-ink underline">
+                      Split it across the selected GPUs
+                    </button>
+                  ) : (
+                    "Select more GPUs and split it across them."
+                  )}
+                </Alert>
+              )}
             </div>
           )}
 
           <div className="mt-5 grid gap-4 border-t border-hairline pt-5 sm:grid-cols-[10rem_1fr] sm:items-start">
-            <Field label="Workers">
-              <input
-                type="number"
-                min={1}
-                max={16}
-                value={workers}
-                onChange={(e) => setWorkers(Math.min(16, Math.max(1, Number(e.target.value) || 1)))}
-                className={inputClass}
-              />
-            </Field>
+            {perGpuMode ? (
+              <Field label="Workers per GPU">
+                <input
+                  type="number"
+                  min={1}
+                  max={16}
+                  value={perGpu}
+                  onChange={(e) => setPerGpu(Math.min(16, Math.max(1, Number(e.target.value) || 1)))}
+                  className={inputClass}
+                />
+              </Field>
+            ) : (
+              <Field label="Workers">
+                <input
+                  type="number"
+                  min={1}
+                  max={16}
+                  value={workers}
+                  onChange={(e) => setWorkers(Math.min(16, Math.max(1, Number(e.target.value) || 1)))}
+                  className={inputClass}
+                />
+              </Field>
+            )}
             <div className="space-y-1.5 text-xs text-ink-3 sm:pt-7">
               <p>
-                Each worker runs its own copy of the model with its own packet capture, and they share the prompts
-                {workers > 1 ? `, so ${workers} workers finish up to ${workers}× sooner.` : ". Add workers to finish sooner."}
+                Each worker runs its own copy of the model with its own containers, network and packet capture.
+                {workerCount > 1
+                  ? ` The prompts are divided between them: ${total} capture${total === 1 ? "" : "s"} over ${workerCount} workers is ${shareText} each, so they finish up to ${workerCount}× sooner.`
+                  : gpuMode === "auto" && system.gpus.length > 1
+                    ? ` With ${system.gpus.length} workers, each GPU runs its own copy and the prompts are divided between them.`
+                    : " Add workers to finish sooner."}
               </p>
-              {onGpu && needMb != null && (
+              {onGpu && perGpuNeed != null && (
                 <p>
-                  Needs about <span className="font-medium text-ink-2">{gb(needMb)}</span> of GPU memory per worker
-                  {workers > 1 && (
+                  Needs about <span className="font-medium text-ink-2">{gb(perGpuNeed)}</span> of GPU memory
+                  {gpuMode === "auto" ? " per worker" : " on each selected GPU"}
+                  {workerCount > 1 && needMb != null && (
                     <>
-                      , <span className="font-medium text-ink-2">{gb(needMb * workers)}</span> in total
+                      , <span className="font-medium text-ink-2">{gb(needMb * workerCount)}</span> in total
                     </>
                   )}
                   .
@@ -315,22 +387,36 @@ export function DataCollectorForm() {
               )}
               {sharedDevice && (
                 <p className="text-ink-2">
-                  These workers share the same {onGpu ? "GPUs" : "CPU"}, so they slow each other down, which changes the
+                  Some workers share {onGpu ? "a GPU" : "the CPU"}, so they slow each other down, which changes the
                   timings you capture.
                 </p>
               )}
             </div>
           </div>
+
+          {workerCount > 1 && total > 0 && (
+            <div className="mt-4 flex flex-wrap gap-1.5">
+              {shares.map((n, k) => (
+                <span
+                  key={k}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-hairline bg-surface-2/50 px-2 py-1 text-[11px] text-ink-3 tabular-nums"
+                >
+                  <span className="font-medium text-ink-2">w{k + 1}</span>
+                  {workerWhere(k)}
+                  <span className="text-ink-2">· {n}</span>
+                </span>
+              ))}
+            </div>
+          )}
         </Section>
 
         <Section
-          icon={MessageSquareText}
           title="Prompts"
           description="Click a category to toggle it. Hover a number to preview the prompt."
           action={
             <div className="flex gap-1">
               <button type="button" onClick={() => setAdding(true)} className={buttonClass("secondary", "sm")}>
-                <Plus className="h-3.5 w-3.5" /> New prompt
+                New prompt
               </button>
               <button type="button" onClick={() => setSelected(new Set(prompts.map((p) => p.number)))} className={buttonClass("ghost", "sm")}>
                 All
@@ -379,7 +465,7 @@ export function DataCollectorForm() {
           </div>
         </Section>
 
-        <Section icon={SlidersHorizontal} title="Generation">
+        <Section title="Generation">
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Repeat each prompt" hint="Every repetition gets a fresh container and its own PCAP.">
               <input
@@ -405,22 +491,19 @@ export function DataCollectorForm() {
 
       <aside className="space-y-4 lg:sticky lg:top-8">
         <div className="overflow-hidden rounded-2xl border border-hairline bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          <div
-            className="px-5 py-5 text-white"
-            style={{ background: "var(--brand-gradient)" }}
-          >
-            <div className="flex items-center gap-1.5 text-xs font-medium text-white/80">
-              <Sparkles className="h-3.5 w-3.5" /> This run
+          <div className="border-b border-hairline px-5 py-5">
+            <div className="text-xs font-medium text-ink-3">This run</div>
+            <div className="mt-1 flex items-baseline gap-2">
+              <span className="text-4xl font-semibold tracking-tight tabular-nums">{total.toLocaleString()}</span>
+              <span className="text-sm text-ink-2">capture{total === 1 ? "" : "s"}</span>
             </div>
-            <div className="mt-2 text-4xl font-semibold tracking-tight">{total.toLocaleString()}</div>
-            <div className="text-sm text-white/80">capture{total === 1 ? "" : "s"}</div>
           </div>
           <dl className="divide-y divide-[var(--hairline)] px-5 text-sm">
             {[
               ["Model", model ? model.split("/").pop() : "—"],
               ["Hardware", hardware],
-              ["Workers", `${workers}`],
-              ...(onGpu && needMb != null ? [["GPU memory", `~${gb(needMb * workers)}`]] : []),
+              ["Workers", workerCount > 1 ? `${workerCount} · ${shareText} captures each` : "1"],
+              ...(onGpu && needMb != null ? [["GPU memory", `~${gb(needMb * workerCount)}`]] : []),
               ["Prompts", `${selected.size} from ${selectedCategories} categor${selectedCategories === 1 ? "y" : "ies"}`],
               ["Repeat", repeat > 1 ? `× ${repeat}` : "Once"],
               ["Max tokens", maxTokens.toLocaleString()],
@@ -450,7 +533,7 @@ export function DataCollectorForm() {
             )}
             {error && <Alert>{error}</Alert>}
             <button type="button" onClick={start} disabled={!canStart} className={`${buttonClass()} w-full`}>
-              {starting ? <Spinner /> : <Play className="h-4 w-4" />}
+              {starting && <Spinner />}
               Start experiment
             </button>
             <p className="text-xs text-ink-3">Containers, network and images created by the run are removed when it ends.</p>

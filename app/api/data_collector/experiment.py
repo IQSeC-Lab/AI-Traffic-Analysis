@@ -7,14 +7,15 @@ For each prompt (optionally repeated):
   3. Send the prompt from a client container on the internal network
   4. Save the PCAP + logs and remove that prompt's containers
 
-A run can use several workers: each is its own model instance with its own packet
-capture, and they share the run's prompts. Several runs can be active at once:
-runs on different GPUs run in parallel and the rest wait in a queue until there
-is room (see scheduler.py). Each run has its own container names and its own
-isolated network.
+A run can use several workers: each is its own model instance (typically one per
+GPU) with its own containers, isolated network and packet capture, and the
+run's prompts are divided evenly between them. Several runs can be active at
+once: runs on different GPUs run in parallel and the rest wait in a queue until
+there is room (see scheduler.py). Each run has its own container names and
+networks.
 
 When a run ends (completed, failed or cancelled) every Docker resource it
-created is removed: its containers, its network and the llm-toolbox image it
+created is removed: its containers, its networks and the llm-toolbox image it
 built. Images the app had to pull (the base image, tcpdump) are shared by
 concurrent runs, so they are removed when the last active run ends.
 Everything a run creates carries the label RUN_LABEL=<run id>, so cleanup
@@ -90,13 +91,21 @@ class ExperimentConfig(BaseModel):
     )
     gpus: list[int] | Literal["auto"] = Field(
         "auto",
-        description='"auto" uses the GPU with the most free memory; a list uses those GPUs '
+        description='"auto" spreads the workers over the GPUs with room; a list uses those GPUs '
                     "(see GET /api/system); an empty list runs on the CPU.",
     )
+    split_model: bool = Field(
+        False,
+        description="With a list of GPUs: false runs each worker on one of them in turn (one copy of the "
+                    "model per GPU); true splits every worker's model across all of them, for models "
+                    "too large for one GPU.",
+    )
     max_tokens: int = Field(2048, ge=1)
-    workers: int = Field(
-        1, ge=1, le=16,
-        description="Model instances running prompts in parallel, each with its own packet capture.",
+    workers: int | None = Field(
+        None, ge=1, le=16,
+        description="Model instances running in parallel, each with its own containers, network and packet "
+                    "capture; the prompts are divided evenly between them. Default: one per listed GPU "
+                    "(unless split_model), otherwise 1.",
     )
     name: str | None = Field(None, max_length=NAME_MAX, description="Optional name to recognize the run by.")
 
@@ -162,13 +171,13 @@ class Experiment:
         # Scheduling
         self.need_mb = need_mb                    # estimated GPU memory per worker (0 on CPU)
         self.worker_gpus: list[list[int]] | None = None   # GPUs of each worker, once started
-        self._workers: list[dict] = []            # per worker: gpus, current prompt, step
+        self._workers: list[dict] = []            # per worker: gpus, network, progress, current prompt, step
+        self._shares: list[list[tuple]] = []      # each worker's prompts, fixed when the run starts
         self.queue_position: int | None = None
         self.queue_reason: str | None = None
 
         self.model_safe   = model_dir_name(config.model)
         self.image        = f"{IMAGE_REPO}:{self.id}"
-        self.network      = f"mallm-{self.id}"   # isolated per run, so parallel runs never see each other
         self.label        = f"{RUN_LABEL}={self.id}"
         self.run_dir      = _runs_dir() / self.id
         self.captures_dir = self.run_dir / "captures"
@@ -195,7 +204,23 @@ class Experiment:
     def start(self, worker_gpus: list[list[int]]) -> None:
         """Called by the scheduler once there is room for all the run's workers."""
         self.worker_gpus = worker_gpus
-        self._workers = [{"gpus": g, "current": None, "step": None} for g in worker_gpus]
+        # Prompts are dealt out in turn (1, 3, 5 / 2, 4, 6) rather than in blocks, so every
+        # category is spread over the workers instead of landing on one GPU.
+        units = list(self._units())
+        n = len(worker_gpus)
+        self._shares = [units[k::n] for k in range(n)]
+        self._workers = [
+            {
+                "gpus": gpus,
+                # Its own isolated network, so no worker's traffic reaches another's capture
+                "network": f"mallm-{self.id}" if n == 1 else f"mallm-{self.id}-w{k + 1}",
+                "done": 0,
+                "total": len(share),
+                "current": None,
+                "step": None,
+            }
+            for k, (gpus, share) in enumerate(zip(worker_gpus, self._shares))
+        ]
         self.queue_position = self.queue_reason = None
         self.started_at = _now()
         self.status = "running"
@@ -217,7 +242,7 @@ class Experiment:
         self._cancel.set()
         self.status = "cancelling"
         self._save()
-        self.log("[experiment] Cancel requested — stopping containers...")
+        self.log("[experiment] Cancel requested, stopping containers...")
         threading.Thread(target=self._stop_containers_until_cleanup, daemon=True).start()
 
     def rename(self, name: str | None) -> None:
@@ -293,23 +318,25 @@ class Experiment:
 
     def _run(self) -> None:
         self.log("=" * 60)
-        self.log(f"LLM Traffic Capture — run {self.id}")
+        self.log(f"LLM Traffic Capture · run {self.id}")
         self.log(f"Model   : {self.config.model}")
-        self.log(f"Network : {self.network}  (--internal bridge, no internet routing)")
-        for k, gpus in enumerate(self.worker_gpus or []):
-            label = f"Worker {k + 1}" if len(self.worker_gpus) > 1 else "GPU     "
-            self.log(f"{label}: {' '.join(_gpu_args(gpus)[1:]) or 'none (CPU)'}")
+        where = lambda gpus: " ".join(_gpu_args(gpus)[1:]) or "none (CPU)"
+        if len(self._workers) == 1:
+            self.log(f"Network : {self._workers[0]['network']}  (--internal bridge, no internet routing)")
+            self.log(f"GPU     : {where(self._workers[0]['gpus'])}")
+        else:
+            self.log(f"Workers : {len(self._workers)}, prompts divided between them, each on its own "
+                     "--internal network (no internet routing)")
+            for k, w in enumerate(self._workers):
+                self.log(f"  w{k + 1}: GPU {where(w['gpus'])} · {w['total']} captures · network {w['network']}")
         self.log(f"Captures: {self.total}")
         self.log(f"Output  : {self.run_dir}")
         self.log("=" * 60)
         try:
             self._setup()
             self.step = None
-            # Workers take the next prompt from a shared list, so a fast worker simply does more.
-            units = iter(self._units())
-            units_lock = threading.Lock()
             workers = [
-                threading.Thread(target=self._work, args=(k, units, units_lock), name=f"{self.id}-w{k + 1}", daemon=True)
+                threading.Thread(target=self._work, args=(k,), name=f"{self.id}-w{k + 1}", daemon=True)
                 for k in range(len(self._workers))
             ]
             for w in workers:
@@ -341,29 +368,28 @@ class Experiment:
             self.log("=" * 60)
             _wake.set()   # its GPU is free: start whatever was waiting for it
 
-    def _work(self, k: int, units, units_lock: threading.Lock) -> None:
+    def _work(self, k: int) -> None:
+        """Run worker k's share of the prompts."""
         self._local.worker = k
         self._local.tag = f"[w{k + 1}] " if len(self._workers) > 1 else ""
         state = self._workers[k]
         try:
-            while not self._cancel.is_set():
-                with units_lock:
-                    unit = next(units, None)
-                if unit is None:
+            for prompt_no, iteration, index in self._shares[k]:
+                if self._cancel.is_set():
                     break
-                prompt_no, iteration, index = unit
                 state["current"] = {"prompt": prompt_no, "iteration": iteration, "index": index}
                 self._save()
                 title = f"Prompt #{prompt_no:02d}"
                 if iteration is not None:
-                    title += f" — iteration {iteration}/{self.config.repeat}"
+                    title += f", iteration {iteration}/{self.config.repeat}"
                 self.log("=" * 60)
-                self.log(f"{title}  —  {self.config.model}")
+                self.log(f"{title} · {self.config.model}")
                 self.log("=" * 60)
                 self._run_prompt(k, self.prompts[prompt_no]["text"], index)
                 if not self._cancel.is_set():
                     with self._state_lock:
                         self.completed += 1
+                        state["done"] += 1
                     self._save()
         except Exception as e:   # a worker failing stops the run; its prompt errors are logged in _run_prompt
             self.error = str(e)
@@ -406,13 +432,14 @@ class Experiment:
         docker.run("pull", NETSHOOT_IMAGE)
         self.log("[setup] ✓ Images ready.")
 
-        self._set_step("Preparing network")
-        docker.must(
-            "network", "create", "--driver", "bridge", "--internal",
-            "--label", self.label, self.network,
-            ctx=f"create network {self.network}",
-        )
-        self.log(f"[setup] ✓ Created isolated network: {self.network}")
+        self._set_step("Preparing network" + ("s" if len(self._workers) > 1 else ""))
+        for w in self._workers:
+            docker.must(
+                "network", "create", "--driver", "bridge", "--internal",
+                "--label", self.label, w["network"],
+                ctx=f"create network {w['network']}",
+            )
+            self.log(f"[setup] ✓ Created isolated network: {w['network']}")
 
     # ── Per-prompt experiment ────────────────────────────────────────────────
 
@@ -430,7 +457,7 @@ class Experiment:
             if self._cancel.is_set():
                 return
             self._set_step("Loading model and streaming the response")
-            response = self._send_prompt(inf_container, prompt, index)
+            response = self._send_prompt(k, inf_container, prompt, index)
             self._set_step("Flushing capture")
             self._cancel.wait(PCAP_FLUSH_SECONDS)   # let tcpdump flush remaining packets
         except Exception as e:
@@ -456,7 +483,7 @@ class Experiment:
         docker.rm_container(cname)
         docker.must(
             "run", "-d", "--name", cname, "--label", self.label,
-            "--network", self.network,
+            "--network", self._workers[k]["network"],
             *_gpu_args(self._workers[k]["gpus"]),
             "-v", f"{MODELS_DIR}:/models:ro",
             "-e", "HF_HUB_OFFLINE=1",
@@ -498,7 +525,7 @@ class Experiment:
         time.sleep(1)
         docker.rm_container(tc_cname)
 
-    def _send_prompt(self, inf_container: str, prompt: str, index: int) -> str | None:
+    def _send_prompt(self, k: int, inf_container: str, prompt: str, index: int) -> str | None:
         """
         Write the prompt to a file, mount it into a client container, and
         reach the inference server by container-name DNS inside the network.
@@ -510,7 +537,7 @@ class Experiment:
         self.log(f"[client] Sending prompt #{index}...")
         p = docker.run(
             "run", "--rm", "--name", cname, "--label", self.label,
-            "--network", self.network,
+            "--network", self._workers[k]["network"],
             "-v", f"{self.logs_dir}:/prompts:ro",
             self.image, "python", "/app/client.py",
             "--host", inf_container,
@@ -526,11 +553,14 @@ class Experiment:
             # Last JSON line is the result printed by client.py
             last_json_line = [l for l in p.stdout.strip().splitlines() if l.startswith("{")][-1]
             result = json.loads(last_json_line)
-            current = self._workers[self._local.worker]["current"]
+            worker = self._workers[k]
+            current = worker["current"]
             (self.results_dir / f"{self.model_safe}-p{index:02d}.json").write_text(json.dumps({
                 **current,
                 "category": self.prompts[current["prompt"]]["category"],
                 "model": self.config.model,
+                "worker": k + 1,
+                "gpus": worker["gpus"],
                 **result,
             }))
             self.log(f"[client] ✓ Prompt #{index} response received")
@@ -572,7 +602,7 @@ class Experiment:
     def _cleanup(self) -> dict:
         """Remove every Docker resource this run created. Never raises."""
         self.log("[cleanup] Removing Docker resources created by this run...")
-        report: dict = {"containers": [], "network": None, "images": [], "errors": []}
+        report: dict = {"containers": [], "networks": [], "images": [], "errors": []}
 
         def remove(what: str, *args: str) -> bool:
             p = docker.run(*args)
@@ -586,8 +616,10 @@ class Experiment:
                 if remove(f"container {name}", "rm", "-f", name):
                     report["containers"].append(name)
 
-            if docker.exists("network", self.network) and remove(f"network {self.network}", "network", "rm", self.network):
-                report["network"] = self.network
+            networks = docker.run("network", "ls", "--filter", f"label={self.label}", "--format", "{{.Name}}")
+            for net in networks.stdout.split():
+                if remove(f"network {net}", "network", "rm", net):
+                    report["networks"].append(net)
 
             # Our image first: a base image can't be removed while an image built on it exists.
             if docker.exists("image", self.image) and remove(f"image {self.image}", "image", "rm", self.image):
@@ -613,7 +645,7 @@ class Experiment:
 
         self.log(
             f"[cleanup] ✓ Removed {len(report['containers'])} container(s), "
-            f"network: {report['network'] or 'none'}, "
+            f"networks: {', '.join(report['networks']) or 'none'}, "
             f"images: {', '.join(report['images']) or 'none'}"
         )
         return report
@@ -648,8 +680,18 @@ def submit(config: ExperimentConfig) -> Experiment:
     if not has_weights(model_dir):
         raise ValueError(f"Model directory has no weight files: {model_dir}. Download it again.")
 
+    if isinstance(config.gpus, list):
+        config.gpus = sorted(set(config.gpus))
+    if config.workers is None:   # one copy of the model per chosen GPU
+        per_gpu = isinstance(config.gpus, list) and config.gpus and not config.split_model
+        config.workers = len(config.gpus) if per_gpu else 1
+    # A worker without prompts would only hold on to GPU memory
+    captures = len(config.prompts or known) * (config.repeat or 1)
+    config.workers = min(config.workers, captures)
+
     need_mb = estimate_gpu_memory_mb(model_dir) if config.gpus != [] else 0
-    scheduler.check_possible(config.gpus, need_mb, config.workers, detect_gpus() if config.gpus != [] else [])
+    gpus = detect_gpus() if config.gpus != [] else []
+    scheduler.check_possible(config.gpus, need_mb, config.workers, gpus, config.split_model)
 
     with _lock:
         run = Experiment(config, need_mb, _next_number())
@@ -671,9 +713,8 @@ def _schedule() -> None:
         reserved: dict[int, float] = {}
 
         def reserve(run: Experiment, worker_gpus: list[list[int]]) -> None:
-            for gpus in worker_gpus:
-                for g in gpus:
-                    reserved[g] = reserved.get(g, 0) + scheduler.per_gpu_mb(run.need_mb, gpus)
+            for g, mb in scheduler.load_mb(worker_gpus, run.need_mb).items():
+                reserved[g] = reserved.get(g, 0) + mb
 
         for r in running:
             reserve(r, r.worker_gpus or [])
@@ -681,7 +722,9 @@ def _schedule() -> None:
 
         position = 0
         for run in queued:
-            placed, reason = scheduler.place(run.config.gpus, run.need_mb, run.config.workers, gpus, reserved, cpu_busy)
+            placed, reason = scheduler.place(
+                run.config.gpus, run.need_mb, run.config.workers, gpus, reserved, cpu_busy, run.config.split_model
+            )
             if placed is None:
                 position += 1
                 run.queue_position, run.queue_reason = position, reason

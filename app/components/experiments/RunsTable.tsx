@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { ChevronRight, Cpu, Plus, Radar, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 
 import { api, isActive, type Run } from "@/lib/api";
 import { runHref } from "@/lib/experiments";
@@ -59,11 +59,10 @@ export function RunsTable({ limit }: { limit?: number }) {
   if (runs.length === 0) {
     return (
       <EmptyState
-        icon={Radar}
         title="No runs yet"
         action={
           <ButtonLink href="/experiments/data-collector/new">
-            <Plus className="h-4 w-4" /> Start your first run
+            Start your first run
           </ButtonLink>
         }
       >
@@ -129,10 +128,7 @@ export function RunsTable({ limit }: { limit?: number }) {
                     {run.outputs.pcaps} PCAPs · {formatBytes(run.outputs.pcap_bytes)}
                   </td>
                   <td className="px-3 py-3 text-xs text-ink-2">
-                    <span className="inline-flex items-center gap-1.5">
-                      <Cpu className="h-3.5 w-3.5 text-ink-3" />
-                      {hardwareLabel(run)}
-                    </span>
+                    {hardwareLabel(run)}
                   </td>
                   <td className="px-3 py-3 text-xs text-ink-2">
                     <div>{timeAgo(run.created_at, now)}</div>
@@ -147,14 +143,13 @@ export function RunsTable({ limit }: { limit?: number }) {
                             e.stopPropagation();
                             remove(run);
                           }}
-                          className="rounded-lg p-1.5 text-ink-3 opacity-100 transition-opacity hover:bg-surface-2 hover:text-critical-text md:opacity-0 md:group-hover:opacity-100"
-                          aria-label={`Delete run ${run.id}`}
-                          title="Delete run"
+                          className="rounded-lg p-1.5 text-ink-3 hover:bg-surface-2 hover:text-critical-text"
+                          aria-label={`Delete experiment #${run.number ?? run.id}`}
+                          title="Delete"
                         >
                           <Trash2 className="h-4 w-4" />
                         </button>
                       )}
-                      <ChevronRight className="h-4 w-4 text-ink-3 opacity-0 transition-opacity group-hover:opacity-100" />
                     </div>
                   </td>
                 </tr>

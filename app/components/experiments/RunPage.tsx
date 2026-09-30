@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { Activity, BarChart3, ChevronRight, Cpu, FileSpreadsheet, FolderArchive, Layers, MessageSquareText, Pencil, Radar, Repeat, Trash2 } from "lucide-react";
+import { Pencil } from "lucide-react";
 
 import { ApiError, api, isActive, type Run } from "@/lib/api";
 import { experimentHref } from "@/lib/experiments";
@@ -93,24 +93,21 @@ export function RunPage({ id, initialTab }: { id: string; initialTab?: Tab }) {
 
   // Finished runs open on their results; live runs on the monitor.
   const current: Tab = tab ?? (active || run.outputs.pcaps === 0 ? "monitor" : "results");
+  const prompts = run.prompt_count ?? run.config.prompts?.length ?? 60;
   const meta = [
-    { icon: Cpu, text: hardwareLabel(run) },
-    {
-      icon: MessageSquareText,
-      text: `${run.prompt_count ?? run.config.prompts?.length ?? 60} prompt${(run.prompt_count ?? run.config.prompts?.length ?? 60) === 1 ? "" : "s"}`,
-    },
-    ...(run.config.repeat ? [{ icon: Repeat, text: `× ${run.config.repeat}` }] : []),
-    ...((run.config.workers ?? 1) > 1 ? [{ icon: Layers, text: `${run.config.workers} workers` }] : []),
+    hardwareLabel(run),
+    `${prompts} prompt${prompts === 1 ? "" : "s"}`,
+    ...(run.config.repeat ? [`× ${run.config.repeat}`] : []),
+    ...((run.config.workers ?? 1) > 1 ? [`${run.config.workers} workers`] : []),
   ];
 
   return (
     <div>
       <nav className="mb-4 flex items-center gap-1.5 text-xs text-ink-3">
-        <Radar className="h-3.5 w-3.5" />
         <Link href={experimentHref("data-collector")} className="hover:text-ink">
           Data Collector
         </Link>
-        <ChevronRight className="h-3 w-3" />
+        <span>/</span>
         <span className="flex items-center gap-1.5 text-ink-2">
           <RunBadge number={run.number} /> {run.id}
         </span>
@@ -126,10 +123,8 @@ export function RunPage({ id, initialTab }: { id: string; initialTab?: Tab }) {
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-ink-3">
             <span className="text-ink-2">{run.config.model}</span>
-            {meta.map(({ icon: Icon, text }) => (
-              <span key={text} className="inline-flex items-center gap-1.5">
-                <Icon className="h-3.5 w-3.5" strokeWidth={1.75} /> {text}
-              </span>
+            {meta.map((text) => (
+              <span key={text}>{text}</span>
             ))}
             <span>{new Date(run.created_at).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}</span>
           </div>
@@ -139,10 +134,10 @@ export function RunPage({ id, initialTab }: { id: string; initialTab?: Tab }) {
           {run.outputs.pcaps > 0 && (
             <>
               <a href={`/api/data-collector/runs/${run.id}/export.zip`} className={buttonClass("secondary")} title="PCAPs, client results, logs and run.json">
-                <FolderArchive className="h-4 w-4" /> Export files
+                Export files
               </a>
               <a href={`/api/data-collector/runs/${run.id}/captures.csv`} className={buttonClass("secondary")} title="One row per capture with its metrics">
-                <FileSpreadsheet className="h-4 w-4" /> Metrics CSV
+                Metrics CSV
               </a>
             </>
           )}
@@ -153,7 +148,7 @@ export function RunPage({ id, initialTab }: { id: string; initialTab?: Tab }) {
           ) : (
             !active && (
               <button type="button" onClick={remove} className={`${buttonClass("secondary")} hover:text-critical-text`}>
-                <Trash2 className="h-4 w-4" /> Delete
+                Delete
               </button>
             )
           )}
@@ -166,10 +161,10 @@ export function RunPage({ id, initialTab }: { id: string; initialTab?: Tab }) {
       <div className="mb-6 flex gap-1 border-b border-hairline">
         {(
           [
-            { id: "monitor", label: "Monitor", icon: Activity, badge: null },
-            { id: "results", label: "Results", icon: BarChart3, badge: run.outputs.pcaps || null },
+            { id: "monitor", label: "Monitor", badge: null },
+            { id: "results", label: "Results", badge: run.outputs.pcaps || null },
           ] as const
-        ).map(({ id: t, label, icon: Icon, badge }) => (
+        ).map(({ id: t, label, badge }) => (
           <button
             key={t}
             type="button"
@@ -178,7 +173,6 @@ export function RunPage({ id, initialTab }: { id: string; initialTab?: Tab }) {
               current === t ? "border-accent font-medium text-ink" : "border-transparent text-ink-3 hover:text-ink"
             }`}
           >
-            <Icon className="h-4 w-4" strokeWidth={1.75} />
             {label}
             {badge != null && (
               <span className="rounded-full bg-surface-2 px-1.5 text-[11px] font-medium text-ink-2 tabular-nums">{badge}</span>
@@ -219,7 +213,7 @@ function RunName({ run, onRenamed }: { run: Run; onRenamed: (run: Run) => void }
             setValue(run.name ?? "");
             setEditing(true);
           }}
-          className="rounded-lg p-1 text-ink-3 opacity-60 hover:bg-surface-2 hover:text-ink group-hover:opacity-100"
+          className="rounded-lg p-1 text-ink-3 hover:bg-surface-2 hover:text-ink"
           aria-label="Rename"
           title="Rename"
         >

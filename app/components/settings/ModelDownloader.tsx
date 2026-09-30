@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Box, Download as DownloadIcon, FolderOpen, Trash2 } from "lucide-react";
+import { Trash2 } from "lucide-react";
 
 import { ACTIVE_DOWNLOAD_STATUSES, api, type Download, type LocalModel, type ModelsResponse } from "@/lib/api";
 import { formatBytes } from "@/lib/format";
@@ -70,7 +70,6 @@ export function ModelDownloader() {
       id="models"
       title="Models"
       description="Download models from Hugging Face. The experiments can use any model listed here."
-      action={<Box className="h-4 w-4 text-ink-3" />}
     >
       <div className="space-y-6">
         <form onSubmit={download} className="grid gap-3 sm:grid-cols-[1fr_11rem_auto] sm:items-end">
@@ -81,7 +80,7 @@ export function ModelDownloader() {
             <input placeholder="main" value={revision} onChange={(e) => setRevision(e.target.value)} className={inputClass} />
           </Field>
           <button type="submit" disabled={busy || !model.trim()} className={`${buttonClass()} sm:mb-[22px]`}>
-            {busy ? <Spinner /> : <DownloadIcon className="h-4 w-4" />} Download
+            {busy && <Spinner />} Download
           </button>
         </form>
 
@@ -113,16 +112,12 @@ export function ModelDownloader() {
 
         <div className="overflow-hidden rounded-xl border border-hairline">
           <div className="flex items-center gap-2 border-b border-hairline bg-surface-2/60 px-4 py-2 text-xs text-ink-3">
-            <FolderOpen className="h-3.5 w-3.5" />
             <code className="truncate">{data?.models_dir ?? "…"}</code>
           </div>
           {data && data.models.length === 0 && <p className="px-4 py-6 text-center text-sm text-ink-3">No models yet.</p>}
           <ul className="divide-y divide-[var(--hairline)]">
             {data?.models.map((m) => (
-              <li key={m.folder} className="group flex items-center gap-4 px-4 py-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent-wash text-accent">
-                  <Box className="h-4 w-4" strokeWidth={1.75} />
-                </div>
+              <li key={m.folder} className="flex items-center gap-4 px-4 py-3">
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{m.model ?? m.folder}</div>
                   <div className="text-xs text-ink-3">
@@ -141,7 +136,7 @@ export function ModelDownloader() {
                   <button
                     type="button"
                     onClick={() => remove(m)}
-                    className="rounded-lg p-1.5 text-ink-3 opacity-100 transition-opacity hover:bg-surface-2 hover:text-critical-text md:opacity-0 md:group-hover:opacity-100"
+                    className="rounded-lg p-1.5 text-ink-3 hover:bg-surface-2 hover:text-critical-text"
                     aria-label={`Delete ${m.model ?? m.folder}`}
                     title="Delete model"
                   >

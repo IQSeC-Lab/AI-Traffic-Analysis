@@ -17,6 +17,8 @@ export function ChartCard({
   table,
   children,
   footer,
+  height,
+  className = "",
 }: {
   title: string;
   subtitle?: ReactNode;
@@ -26,16 +28,19 @@ export function ChartCard({
   table: TableData;
   children: ReactNode;
   footer?: ReactNode;
+  /** The chart's height. Given, the table view scrolls inside the same height, so toggling never reflows a grid. */
+  height?: number;
+  className?: string;
 }) {
   const [view, setView] = useState<"chart" | "table">("chart");
   return (
-    <figure className="rounded-2xl border border-hairline bg-surface p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <figcaption>
+    <figure className={`flex flex-col rounded-2xl border border-hairline bg-surface p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] ${className}`}>
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <figcaption className="min-w-0 flex-1">
           <div className="text-sm font-semibold">{title}</div>
           {subtitle && <div className="mt-0.5 text-xs text-ink-3">{subtitle}</div>}
         </figcaption>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {controls}
           <Segmented
             value={view}
@@ -64,9 +69,12 @@ export function ChartCard({
       )}
 
       {view === "chart" ? (
-        children
+        <div className="mt-auto">{children}</div>
       ) : (
-        <div className="max-h-80 overflow-auto rounded-lg border border-hairline">
+        <div
+          className={`mt-auto overflow-auto rounded-lg border border-hairline ${height ? "" : "max-h-80"}`}
+          style={height ? { height } : undefined}
+        >
           <table className="w-full text-left text-xs">
             <thead className="sticky top-0 bg-surface-2 text-ink-3">
               <tr>

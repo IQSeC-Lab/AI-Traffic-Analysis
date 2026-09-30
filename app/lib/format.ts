@@ -47,6 +47,12 @@ export function timeAgo(iso: string, now = Date.now()): string {
 }
 
 /** Where a run runs: its assigned GPUs once started, otherwise what it asked for. */
+/** "Worker 2 · GPU 1" — which worker made a capture, and where it ran. */
+export function workerLabel(worker: number, gpus?: number[] | null): string {
+  const where = gpus == null ? "" : gpus.length ? ` · GPU ${gpus.join(", ")}` : " · CPU";
+  return `Worker ${worker}${where}`;
+}
+
 export function hardwareLabel(run: { assigned_gpus?: number[] | null; config: { gpus: number[] | "auto" } }): string {
   const gpus = run.assigned_gpus ?? run.config.gpus;
   if (gpus === "auto") return "Auto GPU";

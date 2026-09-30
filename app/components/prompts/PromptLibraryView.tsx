@@ -1,20 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  ChevronRight,
-  ChevronsDownUp,
-  ChevronsUpDown,
-  FolderPlus,
-  Lock,
-  MessagesSquare,
-  Pencil,
-  Plus,
-  Search,
-  Tags,
-  Trash2,
-  UserRound,
-} from "lucide-react";
+import { ChevronRight, Pencil, Search, Trash2 } from "lucide-react";
 
 import { api, type Prompt, type PromptLibrary } from "@/lib/api";
 import { Alert, EmptyState, Loading, PageHeader, StatTile, buttonClass, inputClass } from "@/components/ui";
@@ -102,10 +89,9 @@ export function PromptLibraryView() {
       <PageHeader
         title="Prompts"
         description="The prompts experiments send to the model. Add your own and group them in your own categories."
-        icon={MessagesSquare}
         actions={
           <button type="button" onClick={() => setDialog({})} className={buttonClass()}>
-            <Plus className="h-4 w-4" /> New prompt
+            New prompt
           </button>
         }
       />
@@ -119,31 +105,18 @@ export function PromptLibraryView() {
 
       {library && (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <StatTile label="Prompts" value={library.prompts.length} icon={MessagesSquare} />
+          <div className="grid grid-cols-3 gap-4">
+            <StatTile label="Prompts" value={library.prompts.length} />
             <StatTile
               label="Yours"
               value={custom}
               hint={`${library.prompts.length - custom} built in`}
-              icon={UserRound}
             />
             <StatTile
               label="Categories"
               value={library.categories.length}
               hint={`${customCategories} of yours`}
-              icon={Tags}
             />
-            <button
-              type="button"
-              onClick={() => setDialog({})}
-              className="flex flex-col items-start justify-between rounded-2xl border border-dashed border-hairline p-4 text-left transition-colors hover:border-accent hover:bg-accent-wash/40"
-            >
-              <FolderPlus className="h-5 w-5 text-accent" strokeWidth={1.75} />
-              <span>
-                <span className="block text-sm font-medium">Add a prompt</span>
-                <span className="block text-xs text-ink-3">In any category, new or existing</span>
-              </span>
-            </button>
           </div>
 
           <div className="flex flex-col gap-3 rounded-2xl border border-hairline bg-surface p-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)] md:flex-row md:items-center">
@@ -186,14 +159,13 @@ export function PromptLibraryView() {
                 onClick={() => setOpenCategories(allOpen ? new Set() : new Set(groups.map((g) => g.name)))}
                 className={`${buttonClass("ghost", "sm")} shrink-0 md:ml-auto`}
               >
-                {allOpen ? <ChevronsDownUp className="h-3.5 w-3.5" /> : <ChevronsUpDown className="h-3.5 w-3.5" />}
                 {allOpen ? "Collapse all" : "Expand all"}
               </button>
             )}
           </div>
 
           {groups.length === 0 && (
-            <EmptyState icon={Search} title="No prompts match">
+            <EmptyState title="No prompts match">
               Try another search or category.
             </EmptyState>
           )}
@@ -222,8 +194,7 @@ export function PromptLibraryView() {
                     <span className="rounded-full bg-surface-2 px-2 py-0.5 text-[11px] text-ink-3 tabular-nums">
                       {query.trim() ? `${g.prompts.length} of ${g.count}` : g.count}
                     </span>
-                    <span className="hidden items-center gap-1 text-[11px] text-ink-3 sm:inline-flex">
-                      {g.builtin ? <Lock className="h-3 w-3" /> : <UserRound className="h-3 w-3" />}
+                    <span className="hidden text-[11px] text-ink-3 sm:inline">
                       {g.builtin ? "Built-in category" : "Your category"}
                       {g.builtin && yours > 0 && ` · ${yours} yours`}
                     </span>
@@ -233,7 +204,7 @@ export function PromptLibraryView() {
                     onClick={() => setDialog({ category: g.name })}
                     className={buttonClass("ghost", "sm")}
                   >
-                    <Plus className="h-3.5 w-3.5" /> Add here
+                    Add here
                   </button>
                 </div>
                 {open && (
@@ -241,7 +212,7 @@ export function PromptLibraryView() {
                     {g.prompts.map((p) => {
                       const open = expanded.has(p.number);
                       return (
-                        <li key={p.number} className="group flex items-start gap-4 px-5 py-3">
+                        <li key={p.number} className="flex items-start gap-4 px-5 py-3">
                           <span
                             className={`mt-0.5 inline-flex h-6 min-w-9 shrink-0 items-center justify-center rounded-md px-1.5 text-xs font-medium tabular-nums ${
                               p.builtin ? "bg-surface-2 text-ink-2" : "bg-accent-wash text-accent"
@@ -260,7 +231,7 @@ export function PromptLibraryView() {
                             )}
                           </button>
                           {!p.builtin && (
-                            <div className="flex shrink-0 gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
+                            <div className="flex shrink-0 gap-1">
                               <button
                                 type="button"
                                 onClick={() => setDialog({ prompt: p })}

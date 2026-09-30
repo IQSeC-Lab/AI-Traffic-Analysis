@@ -24,7 +24,7 @@ from statistics import median
 from prompt_library import store as prompt_library
 
 SERVER_PORT = 8000
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 UNCATEGORIZED = "Uncategorized"
 
 # Inter-packet gaps are binned on a log scale: 10 bins per decade, 0.01 ms to 100 s.
@@ -162,6 +162,9 @@ def build_record(pcap: Path, result_file: Path, index: int) -> dict:
         "prompt": prompt,
         "iteration": iteration,
         "category": category,
+        # Which worker (and GPU) captured it, on runs with several workers
+        "worker": result.get("worker"),
+        "gpus": result.get("gpus"),
         "metrics": {
             "packets": len(packets),
             "bytes": sum(p[4] for p in packets),
@@ -212,7 +215,7 @@ def capture_record(run_dir: Path, stem: str, index: int) -> dict:
     except (OSError, ValueError, struct.error) as e:
         prompt, iteration, category = _identity(index, {})
         record = {"version": CACHE_VERSION, "index": index, "prompt": prompt, "iteration": iteration,
-                  "category": category, "error": str(e), "metrics": {}, "size_counts": {},
+                  "category": category, "worker": None, "gpus": None, "error": str(e), "metrics": {}, "size_counts": {},
                   "gap_hist": [0] * (len(GAP_EDGES_MS) - 1)}
     record["key"] = key
     cache.parent.mkdir(exist_ok=True)
@@ -393,6 +396,8 @@ def capture_detail(run_dir: Path, stem: str, index: int, max_points: int = 4000)
         "prompt": record["prompt"],
         "iteration": record["iteration"],
         "category": record["category"],
+        "worker": record.get("worker"),
+        "gpus": record.get("gpus"),
         "metrics": record["metrics"],
         "prompt_text": prompt_text.strip(),
         "response": result.get("response"),

@@ -1,7 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { Check, Palette } from "lucide-react";
+import { Check } from "lucide-react";
 
 import { ACCENTS, applyAccent, currentAccent, subscribeAppearance } from "@/lib/theme";
 import { Card } from "@/components/ui";
@@ -14,7 +14,6 @@ export function AppearanceCard() {
     <Card
       title="Appearance"
       description="Theme and accent color. Saved in this browser."
-      action={<Palette className="h-4 w-4 text-ink-3" />}
     >
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
         <div>
@@ -33,8 +32,8 @@ export function AppearanceCard() {
               type="button"
               onClick={() => applyAccent(a.id)}
               aria-pressed={selected}
-              className={`flex items-center gap-3 rounded-xl border p-3 text-left text-sm transition-all ${
-                selected ? "border-accent ring-4 ring-accent/15" : "border-hairline hover:border-axis"
+              className={`flex items-center gap-3 rounded-xl border p-3 text-left text-sm transition-colors ${
+                selected ? "border-accent bg-accent-wash/60" : "border-hairline hover:border-axis"
               }`}
             >
               <span

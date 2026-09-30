@@ -73,14 +73,18 @@ export type RunConfig = {
   model: string;
   prompts: number[] | null;
   repeat: number | null;
-  gpus: number[] | "auto"; // "auto" = the GPU with the most free memory; [] = CPU
+  gpus: number[] | "auto"; // "auto" = spread over the GPUs with room; [] = CPU
+  split_model?: boolean; // chosen GPUs: split every worker's model across all of them, instead of one GPU each
   max_tokens: number;
-  workers?: number; // model instances sharing the prompts, each with its own capture
+  workers?: number; // model instances dividing the prompts, each with its own containers, network and capture
   name?: string | null; // only sent when starting a run
 };
 
 export type RunWorker = {
   gpus: number[];
+  network?: string;
+  done?: number; // captures finished, of its `total` share of the prompts
+  total?: number;
   current: { prompt: number; iteration: number | null; index: number } | null;
   step: string | null;
 };
@@ -119,7 +123,8 @@ export type Run = {
   output_dir: string;
   cleanup: {
     containers: string[];
-    network: string | null;
+    networks?: string[];
+    network?: string | null; // runs from before each worker had its own network
     images: string[];
     errors: string[];
   } | null;
@@ -179,6 +184,8 @@ export type Capture = {
   prompt: number;
   iteration: number | null;
   category: string | null;
+  worker?: number | null; // which worker captured it (1, 2, ...), and on which GPUs
+  gpus?: number[] | null;
   metrics: Partial<CaptureMetrics>;
   error: string | null;
 };
@@ -188,6 +195,8 @@ export type CaptureDetail = {
   prompt: number;
   iteration: number | null;
   category: string | null;
+  worker?: number | null;
+  gpus?: number[] | null;
   metrics: Partial<CaptureMetrics>;
   prompt_text: string;
   response: string | null;

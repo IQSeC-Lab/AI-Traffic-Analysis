@@ -61,8 +61,13 @@ def zip_run(run_dir: Path, name: str) -> Iterator[bytes]:
 def captures_csv(records: list[dict]) -> str:
     out = io.StringIO()
     writer = csv.writer(out)
-    writer.writerow(["index", "prompt", "iteration", "category", *METRIC_COLUMNS])
+    writer.writerow(["index", "prompt", "iteration", "category", "worker", "gpus", *METRIC_COLUMNS])
     for r in records:
         m = r.get("metrics") or {}
-        writer.writerow([r["index"], r["prompt"], r["iteration"], r["category"], *(m.get(c) for c in METRIC_COLUMNS)])
+        gpus = r.get("gpus")
+        writer.writerow([
+            r["index"], r["prompt"], r["iteration"], r["category"], r.get("worker"),
+            " ".join(map(str, gpus)) if gpus is not None else None,
+            *(m.get(c) for c in METRIC_COLUMNS),
+        ])
     return out.getvalue()

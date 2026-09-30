@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Boxes, CheckCircle2, Hammer, Hourglass, MessageSquareText, Sparkles, Terminal, type LucideIcon } from "lucide-react";
+import { Check } from "lucide-react";
 
 import { api, isActive, type Run, type RunLogs, type RunWorker } from "@/lib/api";
 import { formatBytes, formatDuration, hardwareLabel } from "@/lib/format";
@@ -9,12 +9,7 @@ import { useInterval } from "@/lib/useInterval";
 import { Card, ProgressBar, Spinner, StatTile } from "@/components/ui";
 
 const MAX_LOG_LINES = 2000;
-const PHASES: { name: string; icon: LucideIcon }[] = [
-  { name: "Setup", icon: Hammer },
-  { name: "Prompts", icon: MessageSquareText },
-  { name: "Cleanup", icon: Sparkles },
-  { name: "Done", icon: CheckCircle2 },
-];
+const PHASES = ["Setup", "Prompts", "Cleanup", "Done"];
 
 function phaseIndex(run: Run) {
   if (run.status === "cleaning_up") return 2;
@@ -65,10 +60,7 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
   return (
     <div className="space-y-6">
       {run.status === "queued" && (
-        <div className="flex items-start gap-4 rounded-2xl border border-hairline bg-surface p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-accent-wash text-accent">
-            <Hourglass className="h-5 w-5" strokeWidth={1.75} />
-          </div>
+        <div className="rounded-2xl border border-hairline bg-surface p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
           <div>
             <div className="text-sm font-semibold">
               Waiting in the queue{run.queue?.position ? ` · #${run.queue.position}` : ""}
@@ -101,7 +93,7 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
         </div>
 
         <ol className="mt-6 grid grid-cols-4 gap-3">
-          {PHASES.map(({ name, icon: Icon }, i) => {
+          {PHASES.map((name, i) => {
             const state = i < phase ? "done" : i === phase ? "current" : "todo";
             return (
               <li key={name} className="flex items-center gap-2.5">
@@ -114,7 +106,7 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
                         : "bg-accent-wash text-accent ring-accent/30"
                   }`}
                 >
-                  <Icon className="h-4 w-4" strokeWidth={2} />
+                  {state === "done" || (!active && i === phase) ? <Check className="h-4 w-4" strokeWidth={2.5} /> : <span className="text-xs font-semibold">{i + 1}</span>}
                 </span>
                 <span className={`hidden text-sm sm:block ${state === "todo" ? "text-ink-3" : "font-medium"}`}>{name}</span>
               </li>
@@ -132,16 +124,16 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
           </div>
         )}
 
-        {active && workers.length > 1 && phase === 1 && (
+        {workers.length > 1 && (
           <div className="mt-6 overflow-hidden rounded-xl border border-hairline">
             {workers.map((w, k) => (
-              <WorkerRow key={k} index={k} worker={w} repeat={run.config.repeat} />
+              <WorkerRow key={k} index={k} worker={w} repeat={run.config.repeat} active={active} />
             ))}
           </div>
         )}
       </Card>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatTile label="Elapsed" value={formatDuration(end - started)} />
         <StatTile label="PCAPs" value={run.outputs.pcaps.toLocaleString()} hint={formatBytes(run.outputs.pcap_bytes)} />
         <StatTile
@@ -156,7 +148,6 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
         <Card
           title="Docker cleanup"
           description="Everything this run created was removed when it ended. Nothing else on the host was touched."
-          action={<Boxes className="h-4 w-4 text-ink-3" />}
         >
           <dl className="grid gap-4 text-sm sm:grid-cols-3">
             <div>
@@ -164,8 +155,10 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
               <dd className="mt-0.5">{run.cleanup.containers.length > 0 ? run.cleanup.containers.join(", ") : "None left to remove"}</dd>
             </div>
             <div>
-              <dt className="text-xs text-ink-3">Network</dt>
-              <dd className="mt-0.5">{run.cleanup.network ?? "None"}</dd>
+              <dt className="text-xs text-ink-3">Networks</dt>
+              <dd className="mt-0.5 break-all">
+                {(run.cleanup.networks ?? (run.cleanup.network ? [run.cleanup.network] : [])).join(", ") || "None"}
+              </dd>
             </div>
             <div>
               <dt className="text-xs text-ink-3">Images</dt>
@@ -184,9 +177,7 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
 
       <div className="overflow-hidden rounded-2xl border border-hairline bg-[#0f0f0e] shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
         <div className="flex items-center justify-between border-b border-white/10 px-4 py-2.5">
-          <div className="flex items-center gap-2 text-xs font-medium text-zinc-300">
-            <Terminal className="h-3.5 w-3.5" /> Live log
-          </div>
+          <div className="text-xs font-medium text-zinc-300">Live log</div>
           {active && (
             <span className="flex items-center gap-1.5 text-[11px] text-zinc-400">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-zinc-300" /> following
@@ -222,28 +213,53 @@ function PromptLabel({ current, repeat }: { current: NonNullable<Run["current"]>
     <span className="font-medium">
       Prompt #{String(current.prompt).padStart(2, "0")}
       {current.iteration != null && ` · iteration ${current.iteration}/${repeat}`}
-      <span className="text-ink-3"> — </span>
+      <span className="text-ink-3"> · </span>
     </span>
   );
 }
 
-function WorkerRow({ index, worker, repeat }: { index: number; worker: RunWorker; repeat: number | null }) {
+function WorkerRow({
+  index,
+  worker,
+  repeat,
+  active,
+}: {
+  index: number;
+  worker: RunWorker;
+  repeat: number | null;
+  active: boolean;
+}) {
+  const done = worker.done ?? 0;
+  const total = worker.total;
+  const finished = total != null && done >= total;
   return (
     <div className="flex items-center gap-3 border-b border-hairline px-4 py-2.5 text-sm last:border-b-0">
       <span className="w-20 shrink-0 text-xs font-medium text-ink-3">
         Worker {index + 1}
         <span className="block font-normal">{worker.gpus.length ? `GPU ${worker.gpus.join(", ")}` : "CPU"}</span>
       </span>
-      {worker.current ? (
-        <>
-          <Spinner className="h-3.5 w-3.5 shrink-0 text-accent" />
-          <div className="min-w-0 truncate">
-            <PromptLabel current={worker.current} repeat={repeat} />
-            <span className="text-ink-2">{worker.step ?? "Starting…"}</span>
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        {worker.current ? (
+          <>
+            <Spinner className="h-3.5 w-3.5 shrink-0 text-accent" />
+            <div className="min-w-0 truncate">
+              <PromptLabel current={worker.current} repeat={repeat} />
+              <span className="text-ink-2">{worker.step ?? "Starting…"}</span>
+            </div>
+          </>
+        ) : (
+          <span className="truncate text-ink-3">
+            {finished ? "Finished its prompts" : active ? "Waiting for setup" : "Stopped"}
+          </span>
+        )}
+      </div>
+      {total != null && (
+        <div className="w-24 shrink-0">
+          <div className="mb-1 text-right text-xs text-ink-3 tabular-nums">
+            {done} / {total}
           </div>
-        </>
-      ) : (
-        <span className="text-ink-3">Idle — no prompts left</span>
+          <ProgressBar value={done} max={total} tone={finished ? "good" : "accent"} />
+        </div>
       )}
     </div>
   );

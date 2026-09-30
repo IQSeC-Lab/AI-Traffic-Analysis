@@ -1,43 +1,23 @@
 import Link from "next/link";
 import type { ComponentProps, ReactNode } from "react";
-import {
-  AlertTriangle,
-  Ban,
-  CheckCircle2,
-  CircleDashed,
-  Loader2,
-  XCircle,
-  type LucideIcon,
-} from "lucide-react";
+import { AlertTriangle, Info, Loader2, XCircle } from "lucide-react";
 
 // ── Layout ───────────────────────────────────────────────────────────────────
 
 export function PageHeader({
   title,
   description,
-  icon: Icon,
   actions,
-  eyebrow,
 }: {
   title: ReactNode;
   description?: ReactNode;
-  icon?: LucideIcon;
   actions?: ReactNode;
-  eyebrow?: ReactNode;
 }) {
   return (
     <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
-      <div className="flex min-w-0 items-start gap-4">
-        {Icon && (
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-accent-wash text-accent ring-1 ring-inset ring-[var(--border)]">
-            <Icon className="h-6 w-6" strokeWidth={1.75} />
-          </div>
-        )}
-        <div className="min-w-0">
-          {eyebrow && <div className="mb-1 text-xs font-medium text-ink-3">{eyebrow}</div>}
-          <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-          {description && <p className="mt-1 max-w-2xl text-sm text-ink-2">{description}</p>}
-        </div>
+      <div className="min-w-0">
+        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+        {description && <p className="mt-1 max-w-2xl text-sm text-ink-2">{description}</p>}
       </div>
       {actions && <div className="flex items-center gap-2">{actions}</div>}
     </div>
@@ -86,7 +66,7 @@ const buttonStyles = {
   primary: "bg-accent-strong text-white hover:bg-accent-strong-hover shadow-sm",
   secondary: "border border-hairline bg-surface text-ink hover:bg-surface-2",
   ghost: "text-ink-2 hover:bg-surface-2 hover:text-ink",
-  danger: "bg-critical text-white hover:opacity-90 shadow-sm",
+  danger: "bg-critical text-white hover:bg-critical-hover shadow-sm",
 };
 
 export function buttonClass(variant: keyof typeof buttonStyles = "primary", size: "sm" | "md" = "md") {
@@ -149,19 +129,16 @@ export function StatTile({
   label,
   value,
   hint,
-  icon: Icon,
+  className = "",
 }: {
   label: string;
   value: ReactNode;
   hint?: ReactNode;
-  icon?: LucideIcon;
+  className?: string;
 }) {
   return (
-    <div className="rounded-2xl border border-hairline bg-surface p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-ink-3">{label}</span>
-        {Icon && <Icon className="h-4 w-4 text-ink-3" strokeWidth={1.75} />}
-      </div>
+    <div className={`rounded-2xl border border-hairline bg-surface p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)] ${className}`}>
+      <div className="text-xs font-medium text-ink-3">{label}</div>
       <div className="mt-2 text-2xl font-semibold tracking-tight">{value}</div>
       {hint && <div className="mt-1 text-xs text-ink-3">{hint}</div>}
     </div>
@@ -180,18 +157,19 @@ export function ProgressBar({ value, max, tone = "accent" }: { value: number; ma
   );
 }
 
-const STATUS: Record<string, { label: string; icon: LucideIcon | "live"; color: string }> = {
-  pending: { label: "Starting", icon: "live", color: "var(--accent)" },
-  running: { label: "Running", icon: "live", color: "var(--accent)" },
-  cancelling: { label: "Cancelling", icon: Loader2, color: "var(--warning)" },
-  cleaning_up: { label: "Cleaning up", icon: Loader2, color: "var(--warning)" },
-  completed: { label: "Completed", icon: CheckCircle2, color: "var(--good)" },
-  failed: { label: "Failed", icon: XCircle, color: "var(--critical)" },
-  cancelled: { label: "Cancelled", icon: Ban, color: "var(--ink-3)" },
-  interrupted: { label: "Interrupted", icon: AlertTriangle, color: "var(--serious)" },
-  queued: { label: "Queued", icon: CircleDashed, color: "var(--ink-3)" },
-  preparing: { label: "Preparing", icon: Loader2, color: "var(--accent)" },
-  downloading: { label: "Downloading", icon: "live", color: "var(--accent)" },
+// `live` statuses pulse: something is happening right now
+const STATUS: Record<string, { label: string; color: string; live?: boolean }> = {
+  pending: { label: "Starting", color: "var(--accent)", live: true },
+  running: { label: "Running", color: "var(--accent)", live: true },
+  cancelling: { label: "Cancelling", color: "var(--warning)", live: true },
+  cleaning_up: { label: "Cleaning up", color: "var(--warning)", live: true },
+  completed: { label: "Completed", color: "var(--good)" },
+  failed: { label: "Failed", color: "var(--critical)" },
+  cancelled: { label: "Cancelled", color: "var(--ink-3)" },
+  interrupted: { label: "Interrupted", color: "var(--serious)" },
+  queued: { label: "Queued", color: "var(--ink-3)" },
+  preparing: { label: "Preparing", color: "var(--accent)", live: true },
+  downloading: { label: "Downloading", color: "var(--accent)", live: true },
 };
 
 export function LiveDot({ color = "var(--accent)" }: { color?: string }) {
@@ -206,20 +184,15 @@ export function LiveDot({ color = "var(--accent)" }: { color?: string }) {
   );
 }
 
-/** Status is carried by icon + label, never color alone. */
+/** Status is carried by a dot and its label, never color alone. Live states pulse. */
 export function StatusPill({ status }: { status: string }) {
-  const s = STATUS[status] ?? { label: status, icon: CircleDashed, color: "var(--ink-3)" };
-  const Icon = s.icon;
+  const s = STATUS[status] ?? { label: status, color: "var(--ink-3)" };
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full border border-hairline bg-surface px-2 py-0.5 text-xs font-medium text-ink-2">
-      {Icon === "live" ? (
+      {s.live ? (
         <LiveDot color={s.color} />
       ) : (
-        <Icon
-          className={`h-3.5 w-3.5 ${Icon === Loader2 ? "animate-spin" : ""}`}
-          style={{ color: s.color }}
-          strokeWidth={2}
-        />
+        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: s.color }} />
       )}
       {s.label}
     </span>
@@ -236,7 +209,7 @@ export function Alert({
   const tones = {
     critical: { icon: XCircle, color: "var(--critical)" },
     warning: { icon: AlertTriangle, color: "var(--serious)" },
-    info: { icon: CircleDashed, color: "var(--accent)" },
+    info: { icon: Info, color: "var(--accent)" },
   };
   const { icon: Icon, color } = tones[tone];
   return (
@@ -248,21 +221,16 @@ export function Alert({
 }
 
 export function EmptyState({
-  icon: Icon,
   title,
   children,
   action,
 }: {
-  icon: LucideIcon;
   title: string;
   children?: ReactNode;
   action?: ReactNode;
 }) {
   return (
     <div className="flex flex-col items-center rounded-2xl border border-dashed border-hairline px-6 py-14 text-center">
-      <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-accent-wash text-accent">
-        <Icon className="h-6 w-6" strokeWidth={1.75} />
-      </div>
       <h3 className="text-sm font-semibold">{title}</h3>
       {children && <p className="mt-1 max-w-sm text-sm text-ink-3">{children}</p>}
       {action && <div className="mt-5">{action}</div>}

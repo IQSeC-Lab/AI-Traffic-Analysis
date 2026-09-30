@@ -120,7 +120,7 @@ def list_captures(run_id: str) -> list[dict]:
     run = _get_run(run_id)
     records = analysis.run_aggregate(run.id, run.run_dir, run.model_safe)["records"]
     return [
-        {k: r.get(k) for k in ("index", "prompt", "iteration", "category", "metrics", "error")}
+        {k: r.get(k) for k in ("index", "prompt", "iteration", "category", "worker", "gpus", "metrics", "error")}
         for r in records
     ]
 

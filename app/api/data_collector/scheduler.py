@@ -2,7 +2,14 @@
 Where Data Collector runs go, and whether they can start now.
 
 - A run has one or more workers. Each worker is its own model instance with its
-  own packet capture; the workers share the run's prompts.
+  own containers, network and packet capture; the run's prompts are divided
+  evenly between them.
+- Chosen GPUs: each worker runs on one of them, in turn (worker 1 on the first
+  GPU, worker 2 on the second, ...), so 2 GPUs and 2 workers means one copy of
+  the model on each GPU. With split=True every worker's model is split across
+  all of them instead, for models too large for one GPU.
+- Auto: each worker goes to the GPU with the fewest of the run's workers so far,
+  then the most free memory, so workers spread over the GPUs.
 - Runs (and workers) on different GPUs run in parallel.
 - A worker reserves its model's estimated GPU memory for the whole run: the model
   is reloaded for every prompt, so its real usage comes and goes between prompts,
@@ -27,6 +34,22 @@ def per_gpu_mb(need_mb: float, gpus: list[int]) -> float:
     return need_mb / max(1, len(gpus))
 
 
+def load_mb(worker_gpus: list[list[int]], need_mb: float) -> dict[int, float]:
+    """GPU memory the workers need on each GPU."""
+    load: dict[int, float] = {}
+    for gpus in worker_gpus:
+        for g in gpus:
+            load[g] = load.get(g, 0) + per_gpu_mb(need_mb, gpus)
+    return load
+
+
+def chosen_worker_gpus(request: list[int], workers: int, split: bool) -> list[list[int]]:
+    """The GPUs of each worker on chosen GPUs: all of them (split), or one each in turn."""
+    if split:
+        return [list(request) for _ in range(workers)]
+    return [[request[k % len(request)]] for k in range(workers)]
+
+
 def free_mb(gpu: dict, reserved_mb: float) -> float:
     """Memory a new worker can plan on. nvidia-smi sees other processes and our loaded models;
     reservations cover our workers between prompts, when their model isn't loaded."""
@@ -36,7 +59,7 @@ def free_mb(gpu: dict, reserved_mb: float) -> float:
     return total * HEADROOM - max(gpu.get("memory_used_mb") or 0, reserved_mb)
 
 
-def check_possible(request: GpuRequest, need_mb: float, workers: int, gpus: list[dict]) -> None:
+def check_possible(request: GpuRequest, need_mb: float, workers: int, gpus: list[dict], split: bool = False) -> None:
     """Raise ValueError when a run could never start, even on idle GPUs."""
     if request == []:
         return
@@ -47,7 +70,7 @@ def check_possible(request: GpuRequest, need_mb: float, workers: int, gpus: list
         if need_mb > max(capacity.values()):
             raise ValueError(
                 f"The model needs about {_gb(need_mb)} of GPU memory, more than any single GPU has "
-                f"({_gb(max(capacity.values()))}). Select several GPUs to split it."
+                f"({_gb(max(capacity.values()))}). Choose several GPUs and split the model across them."
             )
         fit = sum(int(cap // need_mb) if cap != float("inf") else 1 for cap in capacity.values())
         if workers > fit:
@@ -59,13 +82,23 @@ def check_possible(request: GpuRequest, need_mb: float, workers: int, gpus: list
     missing = sorted(set(request) - set(capacity))
     if missing:
         raise ValueError(f"GPU(s) {missing} not found. Available: {sorted(capacity)}.")
-    share = per_gpu_mb(need_mb * workers, request)
-    too_small = [i for i in request if share > capacity[i]]
-    if too_small:
+    worker_gpus = chosen_worker_gpus(request, workers, split)
+    load = load_mb(worker_gpus, need_mb)
+    too_small = [i for i in request if load.get(i, 0) > capacity[i]]
+    if not too_small:
+        return
+    i = too_small[0]
+    if not split and need_mb > capacity[i]:
         raise ValueError(
-            f"{workers} worker{'s' if workers > 1 else ''} need about {_gb(share)} on each selected GPU; "
-            f"GPU {too_small[0]} has {_gb(capacity[too_small[0]])}. Use fewer workers or more GPUs."
+            f"The model needs about {_gb(need_mb)} of GPU memory, more than GPU {i} has ({_gb(capacity[i])}). "
+            + ("Split the model across the selected GPUs instead." if len(request) > 1
+               else "Select several GPUs and split the model across them.")
         )
+    on_gpu = sum(i in g for g in worker_gpus)
+    raise ValueError(
+        f"{on_gpu} worker{'s' if on_gpu > 1 else ''} need about {_gb(load[i])} on GPU {i}, "
+        f"which has {_gb(capacity[i])}. Use fewer workers or more GPUs."
+    )
 
 
 def place(
@@ -75,6 +108,7 @@ def place(
     gpus: list[dict],
     reserved: dict[int, float],
     cpu_busy: bool,
+    split: bool = False,
 ) -> tuple[list[list[int]] | None, str]:
     """The GPUs for each worker if the run can start now, otherwise (None, why it waits)."""
     if request == []:
@@ -83,23 +117,25 @@ def place(
         return [[] for _ in range(workers)], ""
 
     if request == "auto":
-        # Each worker goes to the GPU with the most room left, so workers spread out.
+        # Spread the workers: the GPU with the fewest of them first, then the one with the most room.
         room = {g["index"]: free_mb(g, reserved.get(g["index"], 0)) for g in gpus}
+        count = dict.fromkeys(room, 0)
         placement = []
         for _ in range(workers):
             fits = [i for i, free in room.items() if free >= need_mb]
             if not fits:
                 each = f" for each of {workers} instances" if workers > 1 else ""
                 return None, f"Waiting for {_gb(need_mb)} of free memory on a GPU{each}"
-            best = max(fits, key=room.get)
+            best = min(fits, key=lambda i: (count[i], -room[i]))
             room[best] -= need_mb
+            count[best] += 1
             placement.append([best])
         return placement, ""
 
-    # Chosen GPUs: every worker splits its model across all of them.
     by_index = {g["index"]: g for g in gpus}
-    share = per_gpu_mb(need_mb * workers, request)
-    busy = [i for i in request if i not in by_index or free_mb(by_index[i], reserved.get(i, 0)) < share]
+    worker_gpus = chosen_worker_gpus(request, workers, split)
+    load = load_mb(worker_gpus, need_mb)
+    busy = [i for i in request if i not in by_index or free_mb(by_index[i], reserved.get(i, 0)) < load.get(i, 0)]
     if not busy:
-        return [list(request) for _ in range(workers)], ""
-    return None, f"Waiting for {_gb(share)} of free memory on GPU {', '.join(map(str, busy))}"
+        return worker_gpus, ""
+    return None, "Waiting for free memory on " + ", ".join(f"GPU {i} ({_gb(load.get(i, 0))})" for i in busy)

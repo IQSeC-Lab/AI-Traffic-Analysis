@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Settings } from "lucide-react";
 
 import { AppearanceCard } from "@/components/settings/AppearanceCard";
 import { HfTokenCard } from "@/components/settings/HfTokenCard";
@@ -12,7 +11,7 @@ export const metadata: Metadata = { title: "Settings" };
 export default function SettingsPage() {
   return (
     <>
-      <PageHeader title="Settings" description="Appearance, storage, credentials and the models every experiment can use." icon={Settings} />
+      <PageHeader title="Settings" description="Appearance, storage, credentials and the models every experiment can use." />
       <div className="space-y-6">
         <AppearanceCard />
         <StorageCard />

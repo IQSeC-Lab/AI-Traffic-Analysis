@@ -69,10 +69,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <div className="flex h-full flex-col gap-6 px-3 py-4" onClick={(e) => (e.target as HTMLElement).closest("a") && onNavigate?.()}>
       <Link href="/" className="flex items-center gap-2.5 px-2">
-        <div
-          className="flex h-8 w-8 items-center justify-center rounded-lg text-white shadow-sm"
-          style={{ background: "var(--brand-gradient)" }}
-        >
+        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-strong text-white">
           <Radar className="h-4.5 w-4.5" strokeWidth={2} />
         </div>
         <div className="leading-tight">
@@ -184,7 +181,7 @@ export function Sidebar() {
       </aside>
 
       {/* Mobile */}
-      <div className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-hairline bg-page/90 px-4 backdrop-blur lg:hidden">
+      <div className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-hairline bg-page px-4 lg:hidden">
         <Link href="/" className="flex items-center gap-2 text-sm font-semibold">
           <Radar className="h-4 w-4 text-accent" /> MaLLM
         </Link>

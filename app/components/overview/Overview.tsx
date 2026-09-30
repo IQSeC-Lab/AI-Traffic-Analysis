@@ -2,13 +2,12 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { ArrowRight, Box, Container, Cpu, Database, FlaskConical, HardDrive, Layers, Play } from "lucide-react";
 
 import { api, isActive, type ModelsResponse, type Run, type SystemInfo } from "@/lib/api";
 import { EXPERIMENTS, experimentHref, runHref } from "@/lib/experiments";
 import { formatBytes, timeAgo } from "@/lib/format";
 import { useInterval } from "@/lib/useInterval";
-import { Card, LiveDot, ProgressBar, StatTile, StatusPill } from "@/components/ui";
+import { ButtonLink, Card, LiveDot, ProgressBar, StatTile, StatusPill } from "@/components/ui";
 import { RunBadge, runTitle } from "@/components/experiments/RunBadge";
 
 export function Overview() {
@@ -43,14 +42,14 @@ export function Overview() {
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
-        <p className="mt-1 text-sm text-ink-2">Run LLM traffic experiments and see what the network reveals about each model.</p>
+        <p className="mt-1 text-sm text-ink-2">Runs, captures and the state of the experiment host.</p>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <StatTile label="Runs" value={runs ? runs.length : "—"} hint={runs ? `${runs.filter((r) => r.status === "completed").length} completed` : undefined} icon={FlaskConical} />
-        <StatTile label="Captures" value={captures.toLocaleString()} hint="PCAP files" icon={Layers} />
-        <StatTile label="Traffic captured" value={formatBytes(captured)} icon={HardDrive} />
-        <StatTile label="Models ready" value={models ? ready.length : "—"} hint={models ? formatBytes(ready.reduce((a, m) => a + m.size_bytes, 0)) : undefined} icon={Box} />
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatTile label="Runs" value={runs ? runs.length : "—"} hint={runs ? `${runs.filter((r) => r.status === "completed").length} completed` : undefined} />
+        <StatTile label="Captures" value={captures.toLocaleString()} hint="PCAP files" />
+        <StatTile label="Traffic captured" value={formatBytes(captured)} />
+        <StatTile label="Models ready" value={models ? ready.length : "—"} hint={models ? formatBytes(ready.reduce((a, m) => a + m.size_bytes, 0)) : undefined} />
       </div>
 
       {active.length > 0 ? (
@@ -58,12 +57,12 @@ export function Overview() {
           <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold">
             <LiveDot /> In progress
           </h2>
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-2">
             {active.map((run) => (
               <Link
                 key={run.id}
                 href={runHref(run.id)}
-                className="group block rounded-2xl border border-accent/30 bg-surface p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] ring-4 ring-accent/5 transition-colors hover:border-accent/60"
+                className="block rounded-2xl border border-hairline bg-surface p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:border-axis"
               >
                 <div className="flex items-start justify-between gap-3">
                   <RunBadge number={run.number} />
@@ -80,29 +79,20 @@ export function Overview() {
                   <span className="shrink-0">
                     {run.progress.completed} / {run.progress.total}
                   </span>
-                  <ArrowRight className="h-4 w-4 shrink-0 transition-transform group-hover:translate-x-0.5 group-hover:text-accent" />
                 </div>
               </Link>
             ))}
           </div>
         </div>
       ) : runs === null ? null : (
-        <div
-          className="flex flex-wrap items-center justify-between gap-4 rounded-2xl p-6 text-white shadow-sm"
-          style={{ background: "var(--brand-gradient)" }}
-        >
+        <div className="flex items-center justify-between gap-4 rounded-2xl border border-hairline bg-surface p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
           <div>
-            <div className="text-lg font-semibold">Ready for a new experiment</div>
-            <div className="mt-1 max-w-xl text-sm text-white/80">
-              Pick a model and prompts. Every capture runs in a fresh, isolated container, and Docker is left clean afterwards.
+            <div className="text-sm font-semibold">No run in progress</div>
+            <div className="mt-0.5 text-sm text-ink-2">
+              Each capture runs in a fresh, isolated container. Docker is cleaned up when the run ends.
             </div>
           </div>
-          <Link
-            href="/experiments/data-collector/new"
-            className="inline-flex h-9 items-center gap-2 rounded-lg bg-white px-4 text-sm font-medium text-accent-strong shadow-sm hover:bg-white/90"
-          >
-            <Play className="h-4 w-4" /> Start a run
-          </Link>
+          <ButtonLink href="/experiments/data-collector/new">New run</ButtonLink>
         </div>
       )}
 
@@ -110,9 +100,6 @@ export function Overview() {
         <Card title="Host" description="The machine that runs the experiments.">
           <div className="space-y-4">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2">
-                <Container className="h-4 w-4 text-ink-2" />
-              </div>
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium">Docker</div>
                 <div className="text-xs text-ink-3">{system ? (system.docker.available ? `Engine ${system.docker.version}` : system.docker.error) : "…"}</div>
@@ -122,10 +109,7 @@ export function Overview() {
               )}
             </div>
             {system && system.gpus.length === 0 && (
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-surface-2">
-                  <Cpu className="h-4 w-4 text-ink-2" />
-                </div>
+              <div>
                 <div>
                   <div className="text-sm font-medium">No NVIDIA GPU</div>
                   <div className="text-xs text-ink-3">Models run on the CPU</div>
@@ -153,7 +137,6 @@ export function Overview() {
               );
             })}
             <Link href="/settings#models" className="flex items-center gap-3 rounded-lg border border-hairline p-2.5 hover:bg-surface-2">
-              <Database className="h-4 w-4 text-ink-3" />
               <span className="flex-1 text-sm">Models</span>
               <span className="text-xs text-ink-3">{ready.length} ready</span>
             </Link>
@@ -189,43 +172,35 @@ export function Overview() {
         </Card>
       </div>
 
-      <div>
-        <h2 className="mb-3 text-sm font-semibold">Experiments</h2>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {EXPERIMENTS.map(({ slug, name, summary, description, icon: Icon, available }) => {
+      <Card title="Experiments" description="The five MaLLM experiments. They are added to the app one at a time." padded={false}>
+        <ul className="divide-y divide-[var(--hairline)] border-t border-hairline">
+          {EXPERIMENTS.map(({ slug, name, summary, description, available }) => {
             const body = (
               <>
-                <div className="flex items-center justify-between">
-                  <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${available ? "bg-accent-wash text-accent" : "bg-surface-2 text-ink-3"}`}>
-                    <Icon className="h-5 w-5" strokeWidth={1.75} />
-                  </div>
-                  {available ? (
-                    <ArrowRight className="h-4 w-4 text-ink-3 transition-transform group-hover:translate-x-0.5 group-hover:text-accent" />
-                  ) : (
-                    <span className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium text-ink-3">Coming soon</span>
-                  )}
+                <div className="w-48 shrink-0">
+                  <div className="text-sm font-medium">{name}</div>
+                  <div className="text-xs text-ink-3">{summary}</div>
                 </div>
-                <div className="mt-4 text-sm font-semibold">{name}</div>
-                <div className="text-xs font-medium text-ink-3">{summary}</div>
-                <p className="mt-2 text-sm text-ink-2">{description}</p>
+                <p className="min-w-0 flex-1 text-sm text-ink-2">{description}</p>
+                <span className={`w-24 shrink-0 text-right text-xs ${available ? "font-medium text-accent" : "text-ink-3"}`}>
+                  {available ? "Open" : "Not yet"}
+                </span>
               </>
             );
-            return available ? (
-              <Link
-                key={slug}
-                href={experimentHref(slug)}
-                className="group rounded-2xl border border-hairline bg-surface p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-all hover:-translate-y-0.5 hover:shadow-md"
-              >
-                {body}
-              </Link>
-            ) : (
-              <div key={slug} className="rounded-2xl border border-dashed border-hairline p-5 opacity-80">
-                {body}
-              </div>
+            return (
+              <li key={slug}>
+                {available ? (
+                  <Link href={experimentHref(slug)} className="flex items-start gap-6 px-5 py-3.5 hover:bg-surface-2/60">
+                    {body}
+                  </Link>
+                ) : (
+                  <div className="flex items-start gap-6 px-5 py-3.5">{body}</div>
+                )}
+              </li>
             );
           })}
-        </div>
-      </div>
+        </ul>
+      </Card>
     </div>
   );
 }

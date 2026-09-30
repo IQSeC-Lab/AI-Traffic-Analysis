@@ -5,8 +5,8 @@
   "scripts": {
     "dev": "concurrently -k -n next,api -c blue,green \"npm:dev:next\" \"npm:dev:api\"",
     "dev:next": "next dev",
-    "dev:api": ".venv/bin/python -m uvicorn index:app --app-dir api --reload --reload-dir api --port 8000",
-    "start:api": ".venv/bin/python -m uvicorn index:app --app-dir api --port 8000",
+    "dev:api": ".venv/bin/python -m uvicorn index:app --app-dir api --reload --reload-dir api --port ${API_PORT:-8000}",
+    "start:api": ".venv/bin/python -m uvicorn index:app --app-dir api --port ${API_PORT:-8000}",
     "setup:api": "python3 -m venv .venv && .venv/bin/pip install -r api/requirements.txt",
     "build": "next build",
     "start": "next start",

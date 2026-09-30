@@ -1,16 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, Gauge, HardDrive, Layers, Timer, Waypoints, Zap } from "lucide-react";
+import { ArrowDown, ArrowUp } from "lucide-react";
 
 import { api, type Analytics, type Capture, type CaptureMetrics } from "@/lib/api";
 import { formatBytes, formatMs, formatNumber } from "@/lib/format";
 import { useInterval } from "@/lib/useInterval";
 import { Alert, Loading, StatTile, buttonClass } from "@/components/ui";
-import { AnalyticsCharts } from "./AnalyticsCharts";
+import { CategoryChart, GapChart, SizeChart } from "./AnalyticsCharts";
 import { CaptureDrawer } from "./CaptureDrawer";
+import { modelName } from "./RunBadge";
 
-type SortKey = "index" | keyof CaptureMetrics;
+type SortKey = "index" | "worker" | keyof CaptureMetrics;
 
 const COLUMNS: { key: SortKey; label: string; format: (c: Capture) => string }[] = [
   { key: "events", label: "Events", format: (c) => formatNumber(c.metrics.events ?? null, 0) },
@@ -24,6 +25,34 @@ const COLUMNS: { key: SortKey; label: string; format: (c: Capture) => string }[]
 ];
 
 const PAGE = 100;
+
+function median(values: (number | null | undefined)[]): number | null {
+  const v = values.filter((x): x is number => x != null).sort((a, b) => a - b);
+  if (v.length === 0) return null;
+  const mid = Math.floor(v.length / 2);
+  return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
+}
+
+type WorkerStats = { worker: number; gpus: number[] | null; count: number; ttft: number | null; rate: number | null };
+
+/** Captures per worker, with each worker's medians, from the captures list. */
+function workerStats(captures: Capture[]): WorkerStats[] {
+  const groups = new Map<number, Capture[]>();
+  for (const c of captures) {
+    if (c.worker != null) groups.set(c.worker, [...(groups.get(c.worker) ?? []), c]);
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([worker, cs]) => ({
+      worker,
+      gpus: cs[0].gpus ?? null,
+      count: cs.length,
+      ttft: median(cs.map((c) => c.metrics.ttft_ms)),
+      rate: median(cs.map((c) => c.metrics.events_per_s)),
+    }));
+}
+
+const gpuText = (gpus: number[] | null) => (gpus == null ? "" : gpus.length ? `GPU ${gpus.join(", ")}` : "CPU");
 
 export function RunResults({ runId, live }: { runId: string; live: boolean }) {
   const [data, setData] = useState<Analytics | null>(null);
@@ -49,7 +78,12 @@ export function RunResults({ runId, live }: { runId: string; live: boolean }) {
 
   const sorted = useMemo(() => {
     if (!captures) return [];
-    const value = (c: Capture) => (sort.key === "index" ? c.index : (c.metrics[sort.key] as number | null | undefined) ?? -Infinity);
+    const value = (c: Capture) =>
+      sort.key === "index"
+        ? c.index
+        : sort.key === "worker"
+          ? (c.worker ?? -Infinity)
+          : ((c.metrics[sort.key] as number | null | undefined) ?? -Infinity);
     return [...captures].sort((a, b) => (value(a) - value(b)) * (sort.desc ? -1 : 1));
   }, [captures, sort]);
 
@@ -58,6 +92,24 @@ export function RunResults({ runId, live }: { runId: string; live: boolean }) {
 
   const run = data.runs[0];
   const s = run.summary;
+  // Runs with several workers get a tile comparing them, and a column saying which worker (and GPU) made each capture
+  const workers = workerStats(captures);
+  const byWorker = workers.length > 1;
+  const series = [{ id: run.id, label: run.model, color: "var(--accent)" }];
+  const heroFacts: [string, string][] = [
+    ["Traffic captured", formatBytes(s.total_bytes)],
+    ["Response", s.median_response_chars != null ? `${formatNumber(s.median_response_chars, 0)} chars` : "—"],
+    ["Generation", s.median_duration_s != null ? `${formatNumber(s.median_duration_s)} s` : "—"],
+    ["Stream packets", formatNumber(s.median_stream_packets, 0)],
+    ...(byWorker
+      ? [["Workers", `${workers.length} · ${gpuText([...new Set(workers.flatMap((w) => w.gpus ?? []))].sort((a, b) => a - b))}`] as [string, string]]
+      : []),
+  ];
+  const headers: { key: SortKey; label: string }[] = [
+    { key: "index", label: "Prompt" },
+    ...(byWorker ? [{ key: "worker" as SortKey, label: "Worker" }] : []),
+    ...COLUMNS,
+  ];
   if (s.captures === 0) {
     return <Alert tone="info">No captures yet. Results appear here as soon as the first prompt finishes.</Alert>;
   }
@@ -68,16 +120,41 @@ export function RunResults({ runId, live }: { runId: string; live: boolean }) {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <StatTile label="Captures" value={s.captures.toLocaleString()} icon={Layers} />
-        <StatTile label="First event" value={formatMs(s.median_ttft_ms)} hint="median" icon={Timer} />
-        <StatTile label="Stream rate" value={s.median_events_per_s != null ? `${formatNumber(s.median_events_per_s)}/s` : "—"} hint="events, median" icon={Zap} />
-        <StatTile label="Packet gap" value={formatMs(s.median_gap_ms)} hint="median" icon={Gauge} />
-        <StatTile label="Packet size" value={s.median_packet_bytes != null ? `${s.median_packet_bytes} B` : "—"} hint="median payload" icon={Waypoints} />
-        <StatTile label="Captured" value={formatBytes(s.total_bytes)} hint="all PCAPs" icon={HardDrive} />
+      {/* Bento grid: the run at a glance on the left, its headline medians and charts around it */}
+      <div className="grid grid-cols-12 gap-4">
+        <div className="col-span-4 row-span-2 flex flex-col rounded-2xl border border-hairline bg-surface p-6 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+          <div className="text-xs font-medium text-ink-3">Captures</div>
+          <div className="mt-2 text-6xl font-semibold tracking-tight tabular-nums">{s.captures.toLocaleString()}</div>
+          <div className="mt-1 truncate text-sm text-ink-2">{modelName(run.model)}</div>
+          <dl className="mt-auto divide-y divide-[var(--hairline)] pt-6 text-sm">
+            {heroFacts.map(([k, v]) => (
+              <div key={k} className="flex justify-between gap-3 py-2">
+                <dt className="text-ink-3">{k}</dt>
+                <dd className="truncate font-medium tabular-nums">{v}</dd>
+              </div>
+            ))}
+          </dl>
+          <div className="pt-1 text-[11px] text-ink-3">Medians over all captures</div>
+        </div>
+        <StatTile className="col-span-2" label="First event" value={formatMs(s.median_ttft_ms)} hint="median" />
+        <StatTile
+          className="col-span-2"
+          label="Stream rate"
+          value={s.median_events_per_s != null ? `${formatNumber(s.median_events_per_s)}/s` : "—"}
+          hint="events, median"
+        />
+        <StatTile className="col-span-2" label="Packet gap" value={formatMs(s.median_gap_ms)} hint="median" />
+        <StatTile
+          className="col-span-2"
+          label="Packet size"
+          value={s.median_packet_bytes != null ? `${s.median_packet_bytes} B` : "—"}
+          hint="median payload"
+        />
+        <GapChart data={data} series={series} height={230} className="col-span-8" />
+        <CategoryChart data={data} series={series} height={240} className="col-span-7" />
+        <SizeChart data={data} series={series} height={240} className="col-span-5" />
+        {byWorker && <WorkersTile workers={workers} total={captures.length} className="col-span-12" />}
       </div>
-
-      <AnalyticsCharts data={data} series={[{ id: run.id, label: run.model, color: "var(--accent)" }]} />
 
       <div className="overflow-hidden rounded-2xl border border-hairline bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
         <div className="flex items-center justify-between px-5 pt-5 pb-3">
@@ -90,7 +167,7 @@ export function RunResults({ runId, live }: { runId: string; live: boolean }) {
           <table className="w-full text-left text-sm">
             <thead className="border-y border-hairline bg-surface-2/60 text-xs text-ink-3">
               <tr>
-                {[{ key: "index" as SortKey, label: "Prompt" }, ...COLUMNS].map((col) => (
+                {headers.map((col) => (
                   <th key={col.key} className="px-3 py-2 font-medium whitespace-nowrap first:pl-5">
                     <button type="button" onClick={() => sortBy(col.key)} className="inline-flex items-center gap-1 hover:text-ink">
                       {col.label}
@@ -108,6 +185,20 @@ export function RunResults({ runId, live }: { runId: string; live: boolean }) {
                     {c.iteration != null && <span className="text-ink-3"> · {c.iteration}</span>}
                     <div className="text-xs text-ink-3">{c.category}</div>
                   </td>
+                  {byWorker && (
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {c.worker != null ? (
+                        <>
+                          <span className="font-medium">w{c.worker}</span>
+                          <div className="text-xs text-ink-3">
+                            {c.gpus == null ? "" : c.gpus.length ? `GPU ${c.gpus.join(", ")}` : "CPU"}
+                          </div>
+                        </>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                  )}
                   {COLUMNS.map((col) => (
                     <td key={col.key} className="px-3 py-2 whitespace-nowrap text-ink-2">
                       {col.format(c)}
@@ -129,5 +220,53 @@ export function RunResults({ runId, live }: { runId: string; live: boolean }) {
 
       {open !== null && <CaptureDrawer runId={runId} index={open} onClose={() => setOpen(null)} />}
     </div>
+  );
+}
+
+function WorkersTile({ workers, total, className }: { workers: WorkerStats[]; total: number; className: string }) {
+  return (
+    <section className={`rounded-2xl border border-hairline bg-surface p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] ${className}`}>
+      <h2 className="text-sm font-semibold">Workers</h2>
+      <p className="mt-0.5 text-xs text-ink-3">
+        The prompts were divided between the workers. Each ran its own copy of the model, with its own network and capture.
+      </p>
+      <div
+        className="mt-4 grid gap-3"
+        style={{ gridTemplateColumns: `repeat(${Math.min(workers.length, 4)}, minmax(0, 1fr))` }}
+      >
+        {workers.map((w) => {
+          const color = `var(--series-${((w.worker - 1) % 8) + 1})`;
+          const pct = total ? (w.count / total) * 100 : 0;
+          return (
+            <div key={w.worker} className="rounded-xl border border-hairline p-4">
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <span className="flex items-center gap-1.5 font-medium">
+                  <span className="h-2 w-2 rounded-full" style={{ background: color }} />
+                  Worker {w.worker}
+                </span>
+                <span className="text-ink-3">{gpuText(w.gpus)}</span>
+              </div>
+              <div className="mt-2 flex items-baseline gap-1.5">
+                <span className="text-2xl font-semibold tracking-tight tabular-nums">{w.count}</span>
+                <span className="text-xs text-ink-3">captures · {Math.round(pct)}%</span>
+              </div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-2">
+                <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
+              </div>
+              <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <dt className="text-ink-3">First event</dt>
+                  <dd className="font-medium tabular-nums">{formatMs(w.ttft)}</dd>
+                </div>
+                <div>
+                  <dt className="text-ink-3">Events/s</dt>
+                  <dd className="font-medium tabular-nums">{formatNumber(w.rate)}</dd>
+                </div>
+              </dl>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }

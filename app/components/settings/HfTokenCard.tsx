@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, ExternalLink, KeyRound } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 
 import { api, type Settings, type TokenStatus } from "@/lib/api";
 import { Alert, Card, Field, Spinner, buttonClass, inputClass } from "@/components/ui";
@@ -48,16 +48,14 @@ export function HfTokenCard() {
     <Card
       title="Hugging Face"
       description="A token lets you download gated models such as Llama. It is saved on the server and never shown again."
-      action={<KeyRound className="h-4 w-4 text-ink-3" />}
     >
       <div className="space-y-4">
         {status && (
           <div className="flex items-center gap-3 rounded-xl bg-surface-2 px-4 py-3 text-sm">
-            {status.set ? (
-              <CheckCircle2 className="h-4 w-4 shrink-0" style={{ color: "var(--good)" }} />
-            ) : (
-              <KeyRound className="h-4 w-4 shrink-0 text-ink-3" />
-            )}
+            <span
+              className="h-2 w-2 shrink-0 rounded-full"
+              style={{ background: status.set ? "var(--good)" : "var(--ink-3)" }}
+            />
             <div className="min-w-0 text-ink-2">
               {status.source === "saved" && (
                 <>

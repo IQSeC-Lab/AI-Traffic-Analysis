@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FolderOpen, HardDrive } from "lucide-react";
 
 import { api, type Settings } from "@/lib/api";
 import { Alert, Card, Field, Spinner, buttonClass, inputClass } from "@/components/ui";
@@ -48,7 +47,6 @@ export function StorageCard() {
     <Card
       title="Storage"
       description="Where new runs save their PCAPs, logs and results: a folder on the machine running the API."
-      action={<HardDrive className="h-4 w-4 text-ink-3" />}
     >
       <div className="space-y-4">
         <form
@@ -91,9 +89,8 @@ export function StorageCard() {
             <div className="text-xs font-medium text-ink-2">Earlier runs stay where they were saved and are still listed:</div>
             <ul className="mt-1.5 space-y-1">
               {others.map((d) => (
-                <li key={d} className="flex items-center gap-2 text-xs text-ink-3">
-                  <FolderOpen className="h-3.5 w-3.5 shrink-0" />
-                  <code className="truncate">{d}</code>
+                <li key={d} className="text-xs text-ink-3">
+                  <code className="block truncate">{d}</code>
                 </li>
               ))}
             </ul>

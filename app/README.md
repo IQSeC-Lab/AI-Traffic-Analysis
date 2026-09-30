@@ -4,7 +4,7 @@ Web app for running the MaLLM experiments. Next.js (TypeScript, App Router) fron
 
 ```
 app/                              # project root
-├── api/                          # FastAPI backend — all routes under /api
+├── api/                          # FastAPI backend, all routes under /api
 │   ├── index.py                  # app, routers, startup/shutdown hooks
 │   ├── storage.py                # where models, outputs and settings live
 │   ├── system.py                 # GPU (nvidia-smi) and Docker detection
@@ -52,7 +52,7 @@ The sidebar lists the experiments. Only the Data Collector is available so far; 
 | **Overview** (`/`) | Totals, the run in progress, host status (Docker, GPU memory), recent runs |
 | **Data Collector › Runs** | Every run, newest first |
 | **Data Collector › New run** | Pick a downloaded model, the hardware (Auto, chosen GPUs, or CPU), the number of workers, prompts, repeats and max tokens |
-| **Run page** | *Monitor*: queue position, live progress, what each worker is doing, log, Cancel. *Results*: the run's analytics, and every capture with its packets on the wire, prompt, response and a PCAP download. *Export files* downloads the whole run as a zip, *Metrics CSV* one row per capture. Finished runs can be deleted here or from the runs list |
+| **Run page** | *Monitor*: queue position, live progress, what each worker is doing, log, Cancel. *Results*: the run's analytics, and every capture with its packets on the wire, prompt, response and a PCAP download. *Export files* downloads the whole run as a zip, *Metrics CSV* one row per capture (with the worker and GPU that made it). Finished runs can be deleted here or from the runs list |
 | **Prompts** | The prompt library: the 60 built-in prompts plus your own, in your own categories. Add prompts here or from *New run* |
 | **Settings** | Theme (light / dark / system) and accent color, the results folder, HuggingFace token, model downloads and deletion |
 
@@ -62,9 +62,11 @@ Runs are saved in the results folder (`data/` by default, changeable in Settings
 
 ### Workers, parallel runs and the queue
 
-- **Workers.** A run can have several workers. Each is its own model instance with its own packet capture, and they take prompts from a shared list — 60 prompts over 6 workers is about 10 each, and a faster worker simply takes more. Every capture is still one prompt in a fresh container.
-- **Parallel runs.** Several runs can be active at once. Each has its own container names and its own isolated Docker network.
-- **GPU memory.** A model needs roughly its weight files +15% plus 1.5 GB (shown in Settings → Models). Each worker reserves that on its GPU for the whole run. *Auto* puts each worker on the GPU with the most free memory; *Choose GPUs* splits every worker's model across the GPUs you pick.
+- **Workers.** A run can have several workers. Each is its own model instance with its own containers, its own isolated Docker network and its own packet capture. The prompts are divided evenly and fixed when the run starts: worker 1 takes the 1st, 3rd, 5th… capture and worker 2 the 2nd, 4th, 6th…, so 6 prompts on 2 workers is 3 each, and no prompt category ends up on only one GPU. Every capture is still one prompt in a fresh container.
+- **Choose GPUs** (the default when the host has several). *One copy per GPU*: every selected GPU runs its own worker (or several, with *Workers per GPU*), so 2 GPUs run 2 copies of the model side by side. *Split one copy across them*: every worker's model is spread over all the selected GPUs, for models too large for one GPU.
+- **Auto** spreads the workers over the GPUs with free memory: the GPU with the fewest of the run's workers first, then the one with the most room.
+- **Parallel runs.** Several runs can be active at once. Each has its own container names and networks.
+- **GPU memory.** A model needs roughly its weight files +15% plus 1.5 GB (shown in Settings → Models). Each worker reserves that on its GPU for the whole run.
 - **Queue.** A run that doesn't fit yet waits in the queue with the reason shown, and starts by itself as soon as there is room. CPU runs go one at a time.
 - Workers or runs that share a GPU or the CPU slow each other down, which changes the timings being captured.
 
@@ -84,12 +86,12 @@ Results are cached per capture in `analysis/` next to the PCAPs and rebuilt if a
 
 ## Docker cleanup
 
-Everything a Data Collector run creates is labeled `mallm.data-collector.run=<run id>`. When the run ends — completed, failed or cancelled — it removes:
+Everything a Data Collector run creates is labeled `mallm.data-collector.run=<run id>`. When the run ends (completed, failed or cancelled), it removes:
 
 - its containers (inference servers, tcpdump sidecars, clients)
-- its own Docker network (`mallm-<run id>`)
+- its Docker networks: `mallm-<run id>`, or `mallm-<run id>-w1`, `-w2`, … with several workers
 - the `mallm-llm-toolbox:<run id>` image it built
-- images the app had to pull (the base image, `nicolaka/netshoot`) — these are shared by concurrent runs, so the last run to finish removes them
+- images the app had to pull (the base image, `nicolaka/netshoot`). These are shared by concurrent runs, so the last run to finish removes them
 
 Nothing without that label is touched. If the API process dies mid-run, the next start of the API removes the leftovers. Docker's build cache is kept, so the next build takes seconds instead of reinstalling torch.
 
@@ -98,7 +100,7 @@ Nothing without that label is touched. If the API process dies mid-run, the next
 | Path                                   | Contents                                               |
 | -------------------------------------- | ------------------------------------------------------ |
 | `data/data-collector/<run id>/captures` | PCAP per prompt, as in `2-Data-Collector`              |
-| `data/data-collector/<run id>/results`  | client output per capture: response + per-event timing |
+| `data/data-collector/<run id>/results`  | client output per capture: response + per-event timing, and the worker and GPUs that ran it |
 | `data/data-collector/<run id>/logs`     | prompt text, model response and server logs            |
 | `data/data-collector/<run id>/analysis` | cached analytics per capture                           |
 | `data/data-collector/<run id>/run.json` | the run's settings, status and cleanup report          |
@@ -113,5 +115,6 @@ Nothing without that label is touched. If the API process dies mid-run, the next
 | ------------------ | ----------------------- | -------------------------------------------------------------- |
 | `MALLM_MODELS_DIR` | `models/`               | Downloaded models. Point it at an existing models folder to reuse it. |
 | `MALLM_DATA_DIR`   | `data/`                 | Settings, prompts, and experiment outputs unless another results folder is set in Settings. |
-| `HF_TOKEN`         | —                       | HuggingFace token, used when none is saved in Settings.        |
-| `API_URL`          | `http://127.0.0.1:8000` | Where `/api/*` is proxied. Read at build time for `next build`. |
+| `HF_TOKEN`         | none                    | HuggingFace token, used when none is saved in Settings.        |
+| `API_PORT` | `8000` | Port of the FastAPI backend. Used by the `dev:api`/`start:api` scripts *and* by Next.js to forward `/api/*`, so set it for both (e.g. `API_PORT=8007 npm run dev`). |
+| `API_URL` | `http://127.0.0.1:$API_PORT` | Full address Next.js forwards `/api/*` to, if the backend is on another host. Read at build time for `next build`. |

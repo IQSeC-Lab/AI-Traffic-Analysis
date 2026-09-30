@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Download, X } from "lucide-react";
+import { X } from "lucide-react";
 
 import { api, type CaptureDetail } from "@/lib/api";
-import { formatBytes, formatMs, formatNumber } from "@/lib/format";
+import { formatBytes, formatMs, formatNumber, workerLabel } from "@/lib/format";
 import { ChartCard } from "@/components/charts/ChartCard";
 import { SpikeTimeline } from "@/components/charts/SpikeTimeline";
 import { Alert, Loading, buttonClass } from "@/components/ui";
@@ -30,11 +30,14 @@ export function CaptureDrawer({ runId, index, onClose }: { runId: string; index:
   const m = detail?.metrics;
   return (
     <div className="fixed inset-0 z-50">
-      <div className="absolute inset-0 bg-black/30 backdrop-blur-[1px]" onClick={onClose} />
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div className="absolute inset-y-0 right-0 flex w-full max-w-3xl flex-col border-l border-hairline bg-page shadow-2xl">
         <div className="flex items-start justify-between gap-4 border-b border-hairline bg-surface px-6 py-4">
           <div>
-            <div className="text-xs font-medium text-ink-3">{detail?.category ?? "Capture"}</div>
+            <div className="text-xs font-medium text-ink-3">
+              {detail?.category ?? "Capture"}
+              {detail?.worker != null && ` · ${workerLabel(detail.worker, detail.gpus)}`}
+            </div>
             <h2 className="text-lg font-semibold tracking-tight">
               Prompt #{String(detail?.prompt ?? "").padStart(2, "0")}
               {detail?.iteration != null && <span className="font-normal text-ink-3"> · iteration {detail.iteration}</span>}
@@ -46,7 +49,7 @@ export function CaptureDrawer({ runId, index, onClose }: { runId: string; index:
               className={buttonClass("secondary", "sm")}
               download
             >
-              <Download className="h-3.5 w-3.5" /> PCAP
+              Download PCAP
             </a>
             <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-ink-3 hover:bg-surface-2 hover:text-ink" aria-label="Close">
               <X className="h-5 w-5" />
