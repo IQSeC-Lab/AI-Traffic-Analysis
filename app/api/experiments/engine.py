@@ -37,6 +37,7 @@ from collections import Counter, deque
 from datetime import datetime
 from pathlib import Path
 
+from console import console
 from prompt_library import store as prompt_library
 from settings import store as settings_store
 from storage import DATA_DIR, MODELS_DIR, estimate_gpu_memory_mb, has_weights, model_dir_name
@@ -300,13 +301,13 @@ class Experiment:
 
     def log(self, msg: str) -> None:
         msg = getattr(self._local, "tag", "") + msg   # "[w2] " inside a worker when there are several
-        print(msg, flush=True)
         line = f"{datetime.now():%H:%M:%S} {msg}"
         with self._state_lock:
             self._log_seq += 1
             self._log_tail.append((self._log_seq, line))
             with (self.run_dir / "run.log").open("a") as f:
                 f.write(line + "\n")
+        console(msg)   # after run.log: the run keeps its log even when the console is gone
 
     def _set_step(self, step: str | None) -> None:
         """The step of the current worker, or of the whole run outside the workers."""
@@ -802,7 +803,7 @@ def _scheduler_loop() -> None:
         try:
             _schedule()
         except Exception as e:   # keep the loop alive; the next tick retries
-            print(f"[experiments] Scheduler error: {e}", flush=True)
+            console(f"[experiments] Scheduler error: {e}")
 
 
 def _ensure_scheduler() -> None:
@@ -971,7 +972,7 @@ def remove_orphaned_resources() -> None:
         label = f"label={kind.run_label}"
         containers = docker.run("ps", "-aq", "--filter", label, timeout=30)
         if containers.returncode != 0:
-            print(f"[experiments] Skipping orphan cleanup: {containers.stderr.strip()}", flush=True)
+            console(f"[experiments] Skipping orphan cleanup: {containers.stderr.strip()}")
             return
         for cid in containers.stdout.split():
             if docker.run("rm", "-f", cid).returncode == 0:
@@ -988,4 +989,4 @@ def remove_orphaned_resources() -> None:
             removed.append(f"image {image}")
     _set_pulled_images([])
     if removed:
-        print(f"[experiments] Removed orphaned resources: {', '.join(removed)}", flush=True)
+        console(f"[experiments] Removed orphaned resources: {', '.join(removed)}")

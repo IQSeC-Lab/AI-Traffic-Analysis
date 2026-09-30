@@ -20,6 +20,7 @@ from huggingface_hub import snapshot_download
 from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError, RevisionNotFoundError
 from pydantic import BaseModel, Field
 
+from console import console
 from storage import MODEL_ID_PATTERN, MODELS_DIR, estimate_gpu_memory_mb, has_weights, model_dir_name
 
 from . import store
@@ -124,7 +125,7 @@ class Download:
                 self.total_bytes = sum(f.file_size or 0 for f in files)
 
                 self.status = "downloading"
-                print(f"[downloader] Downloading '{self.model}' → {self.target}", flush=True)
+                console(f"[downloader] Downloading '{self.model}' → {self.target}")
                 snapshot_download(**args)
                 (self.target / MARKER_FILE).write_text(json.dumps({
                     "model": self.model,
@@ -132,11 +133,11 @@ class Download:
                     "downloaded_at": _now(),
                 }))
                 self.status = "completed"
-                print(f"[downloader] ✓ Download complete → {self.target}", flush=True)
+                console(f"[downloader] ✓ Download complete → {self.target}")
             except Exception as e:
                 self.error = _describe(e)
                 self.status = "failed"
-                print(f"[downloader] ✗ {self.model}: {e}", flush=True)
+                console(f"[downloader] ✗ {self.model}: {e}")
                 # Remove a folder this download created if nothing was saved in it;
                 # partial downloads are kept so a retry resumes them.
                 if not existed_before and self.target.exists() and _dir_size(self.target, include_cache=False) == 0:
