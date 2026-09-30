@@ -3,23 +3,27 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 
-import { api, type CaptureDetail } from "@/lib/api";
+import { api, type CaptureDetail, type Run } from "@/lib/api";
+import { EXPERIMENTS } from "@/lib/experiments";
 import { formatBytes, formatMs, formatNumber, workerLabel } from "@/lib/format";
 import { ChartCard } from "@/components/charts/ChartCard";
 import { SpikeTimeline } from "@/components/charts/SpikeTimeline";
 import { Alert, Loading, buttonClass } from "@/components/ui";
+import { variantLabel } from "./RunBadge";
 
 const seconds = (v: number) => `${+v.toFixed(v < 10 ? 2 : 1)} s`;
 
-export function CaptureDrawer({ runId, index, onClose }: { runId: string; index: number; onClose: () => void }) {
+/** One capture, addressed by its key (file stem). */
+export function CaptureDrawer({ run, captureKey, onClose }: { run: Run; captureKey: string; onClose: () => void }) {
   const [detail, setDetail] = useState<CaptureDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const url = `/${run.experiment}/runs/${run.id}/captures/${encodeURIComponent(captureKey)}`;
 
   useEffect(() => {
-    api<CaptureDetail>(`/data-collector/runs/${runId}/captures/${index}`)
+    api<CaptureDetail>(url)
       .then(setDetail)
       .catch((e: Error) => setError(e.message));
-  }, [runId, index]);
+  }, [url]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -28,6 +32,10 @@ export function CaptureDrawer({ runId, index, onClose }: { runId: string; index:
   }, [onClose]);
 
   const m = detail?.metrics;
+  // Which temperature, model or network condition it was captured with
+  const variant = EXPERIMENTS.find((e) => e.slug === run.experiment)?.variable
+    ? run.variants.find((v) => v.key === detail?.variant)
+    : undefined;
   return (
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
@@ -36,6 +44,7 @@ export function CaptureDrawer({ runId, index, onClose }: { runId: string; index:
           <div>
             <div className="text-xs font-medium text-ink-3">
               {detail?.category ?? "Capture"}
+              {variant && ` · ${variantLabel(run.experiment, variant)}`}
               {detail?.worker != null && ` · ${workerLabel(detail.worker, detail.gpus)}`}
             </div>
             <h2 className="text-lg font-semibold tracking-tight">
@@ -45,7 +54,7 @@ export function CaptureDrawer({ runId, index, onClose }: { runId: string; index:
           </div>
           <div className="flex items-center gap-2">
             <a
-              href={`/api/data-collector/runs/${runId}/captures/${index}/pcap`}
+              href={`/api${url}/pcap`}
               className={buttonClass("secondary", "sm")}
               download
             >

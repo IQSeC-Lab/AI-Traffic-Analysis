@@ -7,7 +7,8 @@ Loads model from a host-mounted read-only path. Zero network calls.
 Usage (inside container):
     python3 inference_server.py \
         --model-name  prithivMLmods/Evac-Opus-14B-Exp \
-        --model-path  /models/prithivMLmods-Evac-Opus-14B-Exp
+        --model-path  /models/prithivMLmods-Evac-Opus-14B-Exp \
+        [--temperature 0.7]
 """
 
 import argparse
@@ -29,6 +30,16 @@ app = FastAPI()
 MODEL_NAME = None
 model      = None
 tokenizer  = None
+# Sampling temperature, set with --temperature (the Temperature Change experiment
+# sweeps it; 3-Temperature-change edited it here by hand). 0 is greedy decoding.
+TEMPERATURE = 0.7
+
+
+def sampling_kwargs() -> dict:
+    # transformers rejects temperature 0 when sampling, so 0 turns sampling off instead
+    if TEMPERATURE <= 0:
+        return {"do_sample": False}
+    return {"do_sample": True, "temperature": TEMPERATURE}
 
 
 class PromptRequest(BaseModel):
@@ -51,8 +62,7 @@ async def generate_sync(req: PromptRequest):
         input_ids=inputs["input_ids"],
         attention_mask=inputs["attention_mask"],
         max_new_tokens=req.max_tokens,
-        do_sample=True,
-        temperature=0.7,
+        **sampling_kwargs(),
         pad_token_id=tokenizer.eos_token_id,
     )
     # Decode only the newly generated tokens (strip the prompt)
@@ -93,8 +103,7 @@ async def generate_text(req: PromptRequest):
         input_ids=inputs["input_ids"],
         attention_mask=inputs["attention_mask"],
         max_new_tokens=req.max_tokens,
-        do_sample=True,
-        temperature=0.7,
+        **sampling_kwargs(),
         pad_token_id=tokenizer.eos_token_id,
         streamer=streamer,
     )
@@ -155,13 +164,22 @@ def load_model(model_path: str, model_name: str):
     print(f"[server] ✓ Model ready: {model_name}", flush=True)
 
 
+def set_temperature(value: float):
+    global TEMPERATURE
+    TEMPERATURE = value
+    print(f"[server] Sampling: {'greedy (temperature 0)' if value <= 0 else f'temperature {value:g}'}", flush=True)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model-name", required=True, help="Human-readable model label")
     ap.add_argument("--model-path", required=True, help="Absolute path inside container")
     ap.add_argument("--host",       default="0.0.0.0")
     ap.add_argument("--port",       type=int, default=8000)
+    ap.add_argument("--temperature", type=float, default=TEMPERATURE,
+                    help="Sampling temperature (default 0.7); 0 is greedy decoding")
     args = ap.parse_args()
+    set_temperature(args.temperature)
     load_model(args.model_path, args.model_name)
     uvicorn.run(app, host=args.host, port=args.port)
 

@@ -6,18 +6,18 @@ import { useCallback, useEffect, useState } from "react";
 import { Pencil } from "lucide-react";
 
 import { ApiError, api, isActive, type Run } from "@/lib/api";
-import { experimentHref } from "@/lib/experiments";
+import { experimentHref, experimentName } from "@/lib/experiments";
 import { useInterval } from "@/lib/useInterval";
 import { Alert, Loading, StatusPill, buttonClass } from "@/components/ui";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { formatBytes, hardwareLabel } from "@/lib/format";
 import { RunMonitor } from "./RunMonitor";
 import { RunResults } from "./RunResults";
-import { RunBadge, modelName, runTitle } from "./RunBadge";
+import { RunBadge, comparesText, runTitle } from "./RunBadge";
 
 type Tab = "monitor" | "results";
 
-export function RunPage({ id, initialTab }: { id: string; initialTab?: Tab }) {
+export function RunPage({ experiment, id, initialTab }: { experiment: string; id: string; initialTab?: Tab }) {
   const router = useRouter();
   const [confirm, dialog] = useConfirm();
   const [run, setRun] = useState<Run | null>(null);
@@ -27,13 +27,13 @@ export function RunPage({ id, initialTab }: { id: string; initialTab?: Tab }) {
   const [cancelError, setCancelError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
-    api<Run>(`/data-collector/runs/${id}`)
+    api<Run>(`/${experiment}/runs/${id}`)
       .then((r) => {
         setRun(r);
         setNow(Date.now());
       })
       .catch((e) => e instanceof ApiError && e.status === 404 && setNotFound(true));
-  }, [id]);
+  }, [experiment, id]);
 
   const active = run ? isActive(run) : !notFound;
   useEffect(refresh, [refresh]);
@@ -55,7 +55,7 @@ export function RunPage({ id, initialTab }: { id: string; initialTab?: Tab }) {
     if (!ok) return;
     setCancelError(null);
     try {
-      setRun(await api<Run>(`/data-collector/runs/${id}/cancel`, { method: "POST" }));
+      setRun(await api<Run>(`/${experiment}/runs/${id}/cancel`, { method: "POST" }));
     } catch (e) {
       setCancelError((e as Error).message);
     }
@@ -72,8 +72,8 @@ export function RunPage({ id, initialTab }: { id: string; initialTab?: Tab }) {
     if (!ok) return;
     setCancelError(null);
     try {
-      await api(`/data-collector/runs/${id}`, { method: "DELETE" });
-      router.push(experimentHref("data-collector"));
+      await api(`/${experiment}/runs/${id}`, { method: "DELETE" });
+      router.push(experimentHref(experiment));
     } catch (e) {
       setCancelError((e as Error).message);
     }
@@ -83,7 +83,7 @@ export function RunPage({ id, initialTab }: { id: string; initialTab?: Tab }) {
     return (
       <Alert tone="warning">
         Run <code>{id}</code> was not found.{" "}
-        <Link href={experimentHref("data-collector")} className="font-medium text-ink underline">
+        <Link href={experimentHref(experiment)} className="font-medium text-ink underline">
           Back to runs
         </Link>
       </Alert>
@@ -94,7 +94,9 @@ export function RunPage({ id, initialTab }: { id: string; initialTab?: Tab }) {
   // Finished runs open on their results; live runs on the monitor.
   const current: Tab = tab ?? (active || run.outputs.pcaps === 0 ? "monitor" : "results");
   const prompts = run.prompt_count ?? run.config.prompts?.length ?? 60;
+  const compares = comparesText(run);
   const meta = [
+    ...(compares ? [compares] : []),
     hardwareLabel(run),
     `${prompts} prompt${prompts === 1 ? "" : "s"}`,
     ...(run.config.repeat ? [`× ${run.config.repeat}`] : []),
@@ -104,8 +106,8 @@ export function RunPage({ id, initialTab }: { id: string; initialTab?: Tab }) {
   return (
     <div>
       <nav className="mb-4 flex items-center gap-1.5 text-xs text-ink-3">
-        <Link href={experimentHref("data-collector")} className="hover:text-ink">
-          Data Collector
+        <Link href={experimentHref(experiment)} className="hover:text-ink">
+          {experimentName(experiment)}
         </Link>
         <span>/</span>
         <span className="flex items-center gap-1.5 text-ink-2">
@@ -122,7 +124,7 @@ export function RunPage({ id, initialTab }: { id: string; initialTab?: Tab }) {
             <StatusPill status={run.status} />
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-ink-3">
-            <span className="text-ink-2">{run.config.model}</span>
+            <span className="text-ink-2">{run.models.join(", ")}</span>
             {meta.map((text) => (
               <span key={text}>{text}</span>
             ))}
@@ -133,10 +135,10 @@ export function RunPage({ id, initialTab }: { id: string; initialTab?: Tab }) {
         <div className="flex flex-wrap items-center gap-2">
           {run.outputs.pcaps > 0 && (
             <>
-              <a href={`/api/data-collector/runs/${run.id}/export.zip`} className={buttonClass("secondary")} title="PCAPs, client results, logs and run.json">
+              <a href={`/api/${experiment}/runs/${run.id}/export.zip`} className={buttonClass("secondary")} title="PCAPs, client results, logs and run.json">
                 Export files
               </a>
-              <a href={`/api/data-collector/runs/${run.id}/captures.csv`} className={buttonClass("secondary")} title="One row per capture with its metrics">
+              <a href={`/api/${experiment}/runs/${run.id}/captures.csv`} className={buttonClass("secondary")} title="One row per capture with its settings and metrics">
                 Metrics CSV
               </a>
             </>
@@ -181,7 +183,7 @@ export function RunPage({ id, initialTab }: { id: string; initialTab?: Tab }) {
         ))}
       </div>
 
-      {current === "monitor" ? <RunMonitor run={run} now={now} /> : <RunResults runId={run.id} live={active} />}
+      {current === "monitor" ? <RunMonitor run={run} now={now} /> : <RunResults run={run} live={active} />}
       {dialog}
     </div>
   );
@@ -196,7 +198,7 @@ function RunName({ run, onRenamed }: { run: Run; onRenamed: (run: Run) => void }
   async function save() {
     setSaving(true);
     try {
-      onRenamed(await api<Run>(`/data-collector/runs/${run.id}`, { method: "PATCH", body: JSON.stringify({ name: value }) }));
+      onRenamed(await api<Run>(`/${run.experiment}/runs/${run.id}`, { method: "PATCH", body: JSON.stringify({ name: value }) }));
       setEditing(false);
     } finally {
       setSaving(false);
@@ -236,7 +238,7 @@ function RunName({ run, onRenamed }: { run: Run; onRenamed: (run: Run) => void }
         maxLength={60}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={(e) => e.key === "Escape" && setEditing(false)}
-        placeholder={modelName(run.config.model)}
+        placeholder={runTitle({ ...run, name: null })}
         className="h-9 w-72 rounded-lg border border-accent bg-surface px-3 text-lg font-semibold outline-none ring-4 ring-accent/15"
       />
       <button type="submit" disabled={saving} className={buttonClass("primary", "sm")}>

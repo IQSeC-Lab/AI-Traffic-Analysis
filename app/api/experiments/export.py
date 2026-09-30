@@ -8,6 +8,8 @@ import zipfile
 from pathlib import Path
 from typing import Iterator
 
+from .base import Variant
+
 RUN_FILES = ("run.json", "run.log")
 RUN_FOLDERS = ("captures", "results", "logs")   # the analysis/ cache is left out; it is rebuilt from these
 
@@ -58,14 +60,20 @@ def zip_run(run_dir: Path, name: str) -> Iterator[bytes]:
     yield buffer.drain()   # the zip's central directory
 
 
-def captures_csv(records: list[dict]) -> str:
+def captures_csv(records: list[dict], variants: list[Variant]) -> str:
+    """One row per capture: its file stem, the settings of its variant (temperature, model,
+    network condition), its prompt, the worker that made it and its metrics."""
+    by_key = {v.key: v for v in variants}
+    settings = list(dict.fromkeys(c for v in variants for c in v.columns))
     out = io.StringIO()
     writer = csv.writer(out)
-    writer.writerow(["index", "prompt", "iteration", "category", "worker", "gpus", *METRIC_COLUMNS])
+    writer.writerow(["capture", *settings, "index", "prompt", "iteration", "category", "worker", "gpus", *METRIC_COLUMNS])
     for r in records:
         m = r.get("metrics") or {}
         gpus = r.get("gpus")
+        columns = by_key[r["variant"]].columns
         writer.writerow([
+            r["key"], *(columns.get(c) for c in settings),
             r["index"], r["prompt"], r["iteration"], r["category"], r.get("worker"),
             " ".join(map(str, gpus)) if gpus is not None else None,
             *(m.get(c) for c in METRIC_COLUMNS),

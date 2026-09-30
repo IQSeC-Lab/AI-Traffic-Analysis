@@ -5,17 +5,14 @@ import { useCallback, useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
 
 import { api, isActive, type Run } from "@/lib/api";
-import { runHref } from "@/lib/experiments";
+import { experimentHref, runHref } from "@/lib/experiments";
 import { formatBytes, formatDuration, hardwareLabel, timeAgo } from "@/lib/format";
 import { useInterval } from "@/lib/useInterval";
 import { Alert, ButtonLink, EmptyState, Loading, ProgressBar, StatusPill } from "@/components/ui";
 import { useConfirm } from "@/components/ConfirmDialog";
-import { RunBadge, modelName, runTitle } from "./RunBadge";
+import { RunBadge, comparesText, modelName, runTitle } from "./RunBadge";
 
-export { modelName };
-
-
-export function RunsTable({ limit }: { limit?: number }) {
+export function RunsTable({ experiment }: { experiment: string }) {
   const router = useRouter();
   const [runs, setRuns] = useState<Run[] | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -23,13 +20,13 @@ export function RunsTable({ limit }: { limit?: number }) {
   const [confirm, dialog] = useConfirm();
 
   const refresh = useCallback(() => {
-    api<Run[]>("/data-collector/runs")
+    api<Run[]>(`/${experiment}/runs`)
       .then((r) => {
         setRuns(r);
         setNow(Date.now());
       })
       .catch(() => setRuns([]));
-  }, []);
+  }, [experiment]);
   useEffect(refresh, [refresh]);
   useInterval(refresh, runs?.some(isActive) ? 3000 : null);
 
@@ -48,7 +45,7 @@ export function RunsTable({ limit }: { limit?: number }) {
     if (!ok) return;
     setError(null);
     try {
-      await api(`/data-collector/runs/${run.id}`, { method: "DELETE" });
+      await api(`/${experiment}/runs/${run.id}`, { method: "DELETE" });
       refresh();
     } catch (e) {
       setError((e as Error).message);
@@ -61,7 +58,7 @@ export function RunsTable({ limit }: { limit?: number }) {
       <EmptyState
         title="No runs yet"
         action={
-          <ButtonLink href="/experiments/data-collector/new">
+          <ButtonLink href={`${experimentHref(experiment)}/new`}>
             Start your first run
           </ButtonLink>
         }
@@ -71,7 +68,6 @@ export function RunsTable({ limit }: { limit?: number }) {
     );
   }
 
-  const shown = limit ? runs.slice(0, limit) : runs;
   return (
     <>
     {error && <div className="mb-4"><Alert>{error}</Alert></div>}
@@ -90,12 +86,13 @@ export function RunsTable({ limit }: { limit?: number }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-[var(--hairline)]">
-            {shown.map((run) => {
+            {runs.map((run) => {
               const end = run.finished_at ? new Date(run.finished_at).getTime() : now;
+              const compares = comparesText(run);
               return (
                 <tr
                   key={run.id}
-                  onClick={() => router.push(runHref(run.id))}
+                  onClick={() => router.push(runHref(run))}
                   className="group cursor-pointer transition-colors hover:bg-surface-2/60"
                 >
                   <td className="px-5 py-3">
@@ -103,7 +100,9 @@ export function RunsTable({ limit }: { limit?: number }) {
                       <RunBadge number={run.number} />
                       <div className="min-w-0">
                         <div className="truncate font-medium">{runTitle(run)}</div>
-                        <div className="truncate text-xs text-ink-3">{run.name ? modelName(run.config.model) : run.id}</div>
+                        <div className="truncate text-xs text-ink-3">
+                          {[run.name ? run.models.map(modelName).join(", ") : run.id, compares].filter(Boolean).join(" · ")}
+                        </div>
                       </div>
                     </div>
                   </td>

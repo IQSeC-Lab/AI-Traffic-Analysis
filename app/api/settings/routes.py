@@ -8,8 +8,8 @@ from pydantic import BaseModel, Field
 import tempfile
 from pathlib import Path
 
-from data_collector import experiment
-from storage import DATA_DIR, MODELS_DIR
+from experiments import engine
+from storage import DATA_DIR, MODELS_DIR, model_dir_name
 
 from . import model_downloader, store
 from .model_downloader import DownloadRequest
@@ -107,7 +107,7 @@ def list_models() -> dict:
 @router.delete("/models/{folder}", status_code=204)
 def delete_model(folder: str) -> Response:
     """Delete a downloaded model. Refused while it downloads or an active run uses it."""
-    in_use = [r.id for r in experiment.active_runs() if r.model_safe == folder]
+    in_use = [r.id for r in engine.active_runs() if folder in map(model_dir_name, r.models)]
     if in_use:
         raise HTTPException(409, f"Run {in_use[0]} is using this model. Cancel it or wait for it to finish.")
     try:

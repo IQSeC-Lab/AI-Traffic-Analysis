@@ -1,9 +1,33 @@
-import type { Run } from "@/lib/api";
+import type { Run, Variant } from "@/lib/api";
+import { EXPERIMENTS } from "@/lib/experiments";
 
 export const modelName = (model: string) => model.split("/").pop() ?? model;
 
-/** What a run is called: its name if it has one, otherwise its model. */
-export const runTitle = (run: Pick<Run, "name" | "config">) => run.name || modelName(run.config.model);
+/** What a run is called: its name if it has one, otherwise its model (the first of several, +N). */
+export const runTitle = (run: Pick<Run, "name" | "models">) => {
+  if (run.name) return run.name;
+  const [first = "", ...rest] = run.models;
+  return rest.length ? `${modelName(first)} +${rest.length}` : modelName(first);
+};
+
+/** Chart color of the run's i-th variant (the validated series palette). */
+export const variantColor = (i: number) => `var(--series-${(i % 8) + 1})`;
+
+/** How the UI names a variant: the model's short name on Scalability, otherwise its label. */
+export const variantLabel = (experiment: string, v: Pick<Variant, "label" | "model">) =>
+  experiment === "scalability" ? modelName(v.model) : v.label;
+
+/** What a run compares, in a few words ("3 temperatures: 0.3, 0.7, 0.9"). Null when it compares nothing. */
+export function comparesText(run: Pick<Run, "experiment" | "variants">): string | null {
+  const variable = EXPERIMENTS.find((e) => e.slug === run.experiment)?.variable;
+  if (!variable) return null;
+  const n = run.variants.length;
+  const noun = n === 1 ? variable.one : variable.many;
+  if (run.experiment === "temperature-change") {
+    return `${n} ${noun}: ${run.variants.map((v) => v.temperature).join(", ")}`;
+  }
+  return `${n} ${noun}`;
+}
 
 /**
  * The run's number (#7) as a colored badge. The color comes from the number,

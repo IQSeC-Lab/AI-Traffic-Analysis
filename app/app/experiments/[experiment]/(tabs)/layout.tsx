@@ -1,11 +1,12 @@
+import { notFound } from "next/navigation";
 
 import { ExperimentTabs } from "@/components/experiments/ExperimentTabs";
 import { ButtonLink, PageHeader } from "@/components/ui";
-import { EXPERIMENTS, experimentHref } from "@/lib/experiments";
+import { availableExperiment, experimentHref } from "@/lib/experiments";
 
-const experiment = EXPERIMENTS.find((e) => e.slug === "data-collector")!;
-
-export default function DataCollectorLayout({ children }: LayoutProps<"/experiments/data-collector">) {
+export default async function ExperimentLayout({ children, params }: LayoutProps<"/experiments/[experiment]">) {
+  const experiment = availableExperiment((await params).experiment);
+  if (!experiment) notFound();
   const base = experimentHref(experiment.slug);
   return (
     <>

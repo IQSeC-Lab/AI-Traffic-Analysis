@@ -1,10 +1,12 @@
 """
-Analytics for Data Collector runs.
+Analytics for capture runs, of every experiment.
 
 Each capture yields one record that combines
   - the PCAP                         captures/<stem>.pcap
   - the client's per-event timing    results/<stem>.json  (runs from before this existed have none)
 Records are cached in analysis/<stem>.json and rebuilt when the PCAP changes.
+A capture's stem is <variant key>-p<index>, so a run's captures are grouped by the
+variant (temperature, model, network condition) they were made with.
 
 The "stream" is the TCP connection that carried the SSE response: of all the
 flows from the inference server's port, the one with the most payload bytes.
@@ -22,6 +24,8 @@ from pathlib import Path
 from statistics import median
 
 from prompt_library import store as prompt_library
+
+from .base import Variant
 
 SERVER_PORT = 8000
 CACHE_VERSION = 3
@@ -223,15 +227,26 @@ def capture_record(run_dir: Path, stem: str, index: int) -> dict:
     return record
 
 
-def _captures(run_dir: Path, model_safe: str) -> list[tuple[str, int]]:
-    """(file stem, index) for each PCAP in the run, in index order."""
-    prefix = f"{model_safe}-p"
+def _captures(run_dir: Path, variants: list[Variant]) -> list[tuple[str, int, str]]:
+    """(file stem, index, variant key) for each PCAP in the run, in index order, then variant order."""
     found = []
-    for pcap in (run_dir / "captures").glob(f"{prefix}*.pcap"):
-        suffix = pcap.stem[len(prefix):]
-        if suffix.isdigit():
-            found.append((pcap.stem, int(suffix)))
-    return sorted(found, key=lambda c: c[1])
+    for order, variant in enumerate(variants):
+        prefix = f"{variant.key}-p"
+        for pcap in (run_dir / "captures").glob(f"{prefix}*.pcap"):
+            suffix = pcap.stem[len(prefix):]
+            if suffix.isdigit():
+                found.append((pcap.stem, int(suffix), variant.key, order))
+    return [c[:3] for c in sorted(found, key=lambda c: (c[1], c[3]))]
+
+
+def find_capture(run_dir: Path, variants: list[Variant], stem: str) -> tuple[int, Variant] | None:
+    """The index and variant of the capture with this stem, if the run has it."""
+    for variant in variants:
+        prefix = f"{variant.key}-p"
+        suffix = stem[len(prefix):]
+        if stem.startswith(prefix) and suffix.isdigit() and (run_dir / "captures" / f"{stem}.pcap").is_file():
+            return int(suffix), variant
+    return None
 
 
 # =============================================================================
@@ -280,33 +295,59 @@ def _summarize(records: list[dict]) -> dict:
     }
 
 
-def run_aggregate(run_id: str, run_dir: Path, model_safe: str) -> dict:
-    captures = _captures(run_dir, model_safe)
-    pcaps = [run_dir / "captures" / f"{stem}.pcap" for stem, _ in captures]
+def _by_category(records: list[dict]) -> list[dict]:
+    # Library order (built-in categories first), then categories no longer in the library
+    present = list(dict.fromkeys(r["category"] for r in records))
+    order = [c["name"] for c in prompt_library.categories() if c["name"] in present]
+    return [
+        {"category": name, **_summarize([r for r in records if r["category"] == name])}
+        for name in order + [c for c in present if c not in order]
+    ]
+
+
+def _distributions(records: list[dict]) -> tuple[Counter, list[int]]:
+    """Packet size counts and gap histogram over the records."""
+    sizes = Counter()
+    gap_hist = [0] * (len(GAP_EDGES_MS) - 1)
+    for r in records:
+        sizes.update({int(k): v for k, v in r["size_counts"].items()})
+        gap_hist = [a + b for a, b in zip(gap_hist, r["gap_hist"])]
+    return sizes, gap_hist
+
+
+def run_aggregate(run_id: str, run_dir: Path, variants: list[Variant]) -> dict:
+    """The run's records and summaries: over all its captures, and per variant (`groups`)."""
+    captures = _captures(run_dir, variants)
+    pcaps = [run_dir / "captures" / f"{stem}.pcap" for stem, _, _ in captures]
     key = (len(pcaps), max((p.stat().st_mtime_ns for p in pcaps), default=0))
     with _aggregate_lock:
         cached = _aggregate_cache.get(run_id)
         if cached and cached[0] == key:
             return cached[1]
 
-    records = [capture_record(run_dir, stem, index) for stem, index in captures]
-    sizes = Counter()
-    gap_hist = [0] * (len(GAP_EDGES_MS) - 1)
-    for r in records:
-        sizes.update({int(k): v for k, v in r["size_counts"].items()})
-        gap_hist = [a + b for a, b in zip(gap_hist, r["gap_hist"])]
+    records = []
+    for stem, index, variant in captures:
+        record = capture_record(run_dir, stem, index)
+        records.append({**record, "key": stem, "variant": variant})
+    sizes, gap_hist = _distributions(records)
 
-    # Library order (built-in categories first), then categories no longer in the library
-    present = list(dict.fromkeys(r["category"] for r in records))
-    order = [c["name"] for c in prompt_library.categories() if c["name"] in present]
-    by_category = [
-        {"category": name, **_summarize([r for r in records if r["category"] == name])}
-        for name in order + [c for c in present if c not in order]
-    ]
+    groups = []
+    for variant in variants:
+        mine = [r for r in records if r["variant"] == variant.key]
+        group_sizes, group_gaps = _distributions(mine)
+        groups.append({
+            "key": variant.key,
+            "label": variant.label,
+            "summary": _summarize(mine),
+            "by_category": _by_category(mine),
+            "size_counts": group_sizes,
+            "gap_hist": group_gaps,
+        })
 
     aggregate = {
         "summary": _summarize(records),
-        "by_category": by_category,
+        "by_category": _by_category(records),
+        "groups": groups,
         "size_counts": sizes,
         "gap_hist": gap_hist,
         "records": records,
@@ -374,7 +415,7 @@ def gap_histogram(series: dict[str, list[int]]) -> dict:
     }
 
 
-def capture_detail(run_dir: Path, stem: str, index: int, max_points: int = 4000) -> dict:
+def capture_detail(run_dir: Path, stem: str, index: int, variant: Variant, max_points: int = 4000) -> dict:
     record = capture_record(run_dir, stem, index)
     packets = read_packets(run_dir / "captures" / f"{stem}.pcap")
     stream = _stream(packets)
@@ -392,6 +433,8 @@ def capture_detail(run_dir: Path, stem: str, index: int, max_points: int = 4000)
     known = prompt_library.get(record["prompt"])
     prompt_text = prompt_file.read_text() if prompt_file.exists() else (known["text"] if known else "")
     return {
+        "key": stem,
+        "variant": variant.key,
         "index": index,
         "prompt": record["prompt"],
         "iteration": record["iteration"],

@@ -3,10 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check } from "lucide-react";
 
-import { api, isActive, type Run, type RunLogs, type RunWorker } from "@/lib/api";
+import { api, isActive, type CurrentCapture, type Run, type RunLogs, type RunWorker } from "@/lib/api";
+import { EXPERIMENTS } from "@/lib/experiments";
 import { formatBytes, formatDuration, hardwareLabel } from "@/lib/format";
 import { useInterval } from "@/lib/useInterval";
 import { Card, ProgressBar, Spinner, StatTile } from "@/components/ui";
+import { variantColor, variantLabel } from "./RunBadge";
 
 const MAX_LOG_LINES = 2000;
 const PHASES = ["Setup", "Prompts", "Cleanup", "Done"];
@@ -28,7 +30,7 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
   const refreshLogs = useCallback(() => {
     if (fetching.current) return;
     fetching.current = true;
-    api<RunLogs>(`/data-collector/runs/${run.id}/logs?after=${cursor.current}`)
+    api<RunLogs>(`/${run.experiment}/runs/${run.id}/logs?after=${cursor.current}`)
       .then(({ lines: fresh, next }) => {
         cursor.current = next;
         if (fresh.length > 0) setLines((prev) => [...prev, ...fresh].slice(-MAX_LOG_LINES));
@@ -37,7 +39,7 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
       .finally(() => {
         fetching.current = false;
       });
-  }, [run.id]);
+  }, [run.experiment, run.id]);
 
   // Runs again when the run finishes, to pick up its last lines.
   useEffect(refreshLogs, [refreshLogs, active]);
@@ -56,6 +58,7 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
   const eta = active && completed > 0 ? ((end - started) / completed) * (total - completed) : null;
   const phase = phaseIndex(run);
   const workers = run.workers ?? [];
+  const variable = EXPERIMENTS.find((e) => e.slug === run.experiment)?.variable;
 
   return (
     <div className="space-y-6">
@@ -127,7 +130,7 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
             <div className="mt-6 flex items-center gap-3 rounded-xl bg-surface-2 px-4 py-3 text-sm">
               <Spinner className="h-4 w-4 text-accent" />
               <div className="min-w-0">
-                {run.current && <PromptLabel current={run.current} repeat={run.config.repeat} />}
+                {run.current && <PromptLabel current={run.current} run={run} />}
                 <span className="text-ink-2">
                   {run.status === "cancelling" ? "Cancelling…" : (run.step ?? "Starting…")}
                 </span>
@@ -149,12 +152,45 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
             value={(run.assigned_gpus?.length ?? 0) > 2 ? `${run.assigned_gpus!.length} GPUs` : hardwareLabel(run)}
             hint={
               run.gpu_memory_mb
-                ? `~${(run.gpu_memory_mb / 1024).toFixed(1)} GB ${workers.length > 1 ? "per worker" : "reserved"}`
+                ? `~${(run.gpu_memory_mb / 1024).toFixed(1)} GB ${workers.length > 1 ? "per worker" : "reserved"}${run.models.length > 1 ? ", for the largest model" : ""}`
                 : undefined
             }
           />
           <StatTile label="Max tokens" value={run.config.max_tokens.toLocaleString()} />
         </div>
+
+        {variable && run.variants.length > 0 && (
+          <Card
+            className="col-span-12"
+            title={`Progress by ${variable.one}`}
+            description={`Every prompt is captured once per ${variable.one}. They take turns, so each ${variable.one} advances at the same pace.`}
+          >
+            <div className="grid grid-cols-4 gap-3">
+              {run.variants.map((v, i) => {
+                const done = v.done ?? 0;
+                const total = v.total ?? 0;
+                return (
+                  <div key={v.key} className="min-w-0 rounded-xl border border-hairline px-4 py-3">
+                    <div className="flex items-center justify-between gap-2 text-sm">
+                      <span className="flex min-w-0 items-center gap-2 font-medium">
+                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: variantColor(i) }} />
+                        <span className="truncate" title={v.label}>
+                          {variantLabel(run.experiment, v)}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-xs text-ink-3 tabular-nums">
+                        {done} / {total}
+                      </span>
+                    </div>
+                    <div className="mt-2">
+                      <ProgressBar value={done} max={total} tone={total > 0 && done >= total ? "good" : "accent"} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        )}
 
         {workers.length > 1 && (
           <Card
@@ -165,7 +201,7 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
             {/* Two columns on wide screens: with workers dealt out over 2 GPUs in turn, each column is one GPU */}
             <div className="grid gap-3 2xl:grid-cols-2">
               {workers.map((w, k) => (
-                <WorkerRow key={k} index={k} worker={w} repeat={run.config.repeat} active={active} />
+                <WorkerRow key={k} index={k} worker={w} run={run} active={active} />
               ))}
             </div>
           </Card>
@@ -242,11 +278,16 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
   );
 }
 
-function PromptLabel({ current, repeat }: { current: NonNullable<Run["current"]>; repeat: number | null }) {
+function PromptLabel({ current, run }: { current: CurrentCapture; run: Run }) {
+  // On experiments that compare variants, also which one (temperature, model, network condition)
+  const variant = EXPERIMENTS.find((e) => e.slug === run.experiment)?.variable
+    ? run.variants.find((v) => v.key === current.variant)
+    : undefined;
   return (
     <span className="font-medium">
       Prompt #{String(current.prompt).padStart(2, "0")}
-      {current.iteration != null && ` · iteration ${current.iteration}/${repeat}`}
+      {current.iteration != null && ` · iteration ${current.iteration}/${run.config.repeat}`}
+      {variant && ` · ${variantLabel(run.experiment, variant)}`}
       <span className="text-ink-3"> · </span>
     </span>
   );
@@ -255,12 +296,12 @@ function PromptLabel({ current, repeat }: { current: NonNullable<Run["current"]>
 function WorkerRow({
   index,
   worker,
-  repeat,
+  run,
   active,
 }: {
   index: number;
   worker: RunWorker;
-  repeat: number | null;
+  run: Run;
   active: boolean;
 }) {
   const done = worker.done ?? 0;
@@ -277,7 +318,7 @@ function WorkerRow({
           <>
             <Spinner className="h-3.5 w-3.5 shrink-0 text-accent" />
             <div className="min-w-0 truncate" title={worker.step ?? undefined}>
-              <PromptLabel current={worker.current} repeat={repeat} />
+              <PromptLabel current={worker.current} run={run} />
               <span className="text-ink-2">{worker.step ?? "Starting…"}</span>
             </div>
           </>

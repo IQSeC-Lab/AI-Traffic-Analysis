@@ -69,8 +69,17 @@ export type PromptCategory = { name: string; count: number; builtin: boolean };
 
 export type PromptLibrary = { prompts: Prompt[]; categories: PromptCategory[] };
 
+export type NetworkCondition = {
+  delay_ms: number;
+  jitter_ms: number; // needs a delay
+  distribution: "normal" | "pareto" | "paretonormal"; // shape of the jitter
+};
+
 export type RunConfig = {
-  model: string;
+  model?: string; // every experiment but Scalability
+  models?: string[]; // Scalability: the models compared
+  temperatures?: number[]; // Temperature Change: 0 is greedy decoding
+  conditions?: NetworkCondition[]; // Delay
   prompts: number[] | null;
   repeat: number | null;
   gpus: number[] | "auto"; // "auto" = spread over the GPUs with room; [] = CPU
@@ -80,13 +89,28 @@ export type RunConfig = {
   name?: string | null; // only sent when starting a run
 };
 
+/** The capture a worker is on. `variant` is a Variant key (runs before variants have none). */
+export type CurrentCapture = { prompt: number; iteration: number | null; index: number; variant?: string };
+
 export type RunWorker = {
   gpus: number[];
   network?: string;
   done?: number; // captures finished, of its `total` share of the prompts
   total?: number;
-  current: { prompt: number; iteration: number | null; index: number } | null;
+  current: CurrentCapture | null;
   step: string | null;
+};
+
+/** One setting a run compares: a temperature, a model, a network condition. The Data Collector has one. */
+export type Variant = {
+  key: string; // its captures are <key>-pNN
+  label: string;
+  model: string;
+  temperature: number | null;
+  network: NetworkCondition | null; // null: no delay added
+  columns: Record<string, string | number | null>;
+  done?: number; // captures finished, of `total`
+  total?: number;
 };
 
 export type RunStatus =
@@ -104,11 +128,13 @@ export type Run = {
   id: string;
   number?: number; // #1, #2, ... never reused
   name?: string | null;
-  experiment: string;
+  experiment: string; // the experiment's slug
   status: RunStatus;
   step: string | null;
-  current: { prompt: number; iteration: number | null; index: number } | null;
+  current: CurrentCapture | null;
   config: RunConfig;
+  models: string[];
+  variants: Variant[];
   assigned_gpus?: number[] | null; // where the scheduler started it ([] = CPU)
   workers?: RunWorker[];
   gpu_memory_mb?: number | null;
@@ -166,20 +192,17 @@ export type CategoryStats = RunSummaryStats & { category: string };
 
 export type Histogram = { edges: number[]; series: Record<string, number[]>; outside?: Record<string, number> };
 
+/** Summaries and distributions per group: a run's variants, or runs compared. Histogram series are keyed by group key. */
 export type Analytics = {
-  runs: {
-    id: string;
-    model: string;
-    status: RunStatus;
-    created_at: string;
-    summary: RunSummaryStats;
-    by_category: CategoryStats[];
-  }[];
+  summary?: RunSummaryStats; // over all the run's captures (a single run's analytics)
+  groups: { key: string; label: string; summary: RunSummaryStats; by_category: CategoryStats[] }[];
   gap_hist: Histogram;
   size_hist: Histogram;
 };
 
 export type Capture = {
+  key: string; // file stem, how the API addresses the capture
+  variant: string;
   index: number;
   prompt: number;
   iteration: number | null;
@@ -191,6 +214,8 @@ export type Capture = {
 };
 
 export type CaptureDetail = {
+  key: string;
+  variant: string;
   index: number;
   prompt: number;
   iteration: number | null;

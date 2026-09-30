@@ -3,15 +3,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 
-import { api, type Analytics, type Capture, type CaptureMetrics } from "@/lib/api";
+import { api, type Analytics, type Capture, type CaptureMetrics, type Run } from "@/lib/api";
+import { EXPERIMENTS } from "@/lib/experiments";
 import { formatBytes, formatMs, formatNumber } from "@/lib/format";
 import { useInterval } from "@/lib/useInterval";
 import { Alert, Loading, StatTile, buttonClass } from "@/components/ui";
-import { CategoryChart, GapChart, SizeChart } from "./AnalyticsCharts";
+import type { Series } from "@/components/charts/scale";
+import { CategoryChart, CompareChart, GapChart, SizeChart } from "./AnalyticsCharts";
 import { CaptureDrawer } from "./CaptureDrawer";
-import { modelName } from "./RunBadge";
+import { comparesText, modelName, variantColor, variantLabel } from "./RunBadge";
 
-type SortKey = "index" | "worker" | keyof CaptureMetrics;
+type SortKey = "index" | "worker" | "variant" | keyof CaptureMetrics;
 
 const COLUMNS: { key: SortKey; label: string; format: (c: Capture) => string }[] = [
   { key: "events", label: "Events", format: (c) => formatNumber(c.metrics.events ?? null, 0) },
@@ -54,25 +56,26 @@ function workerStats(captures: Capture[]): WorkerStats[] {
 
 const gpuText = (gpus: number[] | null) => (gpus == null ? "" : gpus.length ? `GPU ${gpus.join(", ")}` : "CPU");
 
-export function RunResults({ runId, live }: { runId: string; live: boolean }) {
+export function RunResults({ run, live }: { run: Run; live: boolean }) {
   const [data, setData] = useState<Analytics | null>(null);
   const [captures, setCaptures] = useState<Capture[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "index", desc: false });
   const [shown, setShown] = useState(PAGE);
-  const [open, setOpen] = useState<number | null>(null);
+  const [open, setOpen] = useState<string | null>(null);
+  const base = `/${run.experiment}/runs/${run.id}`;
+  // What the run compares (temperature, model, network condition); the Data Collector compares nothing
+  const variable = EXPERIMENTS.find((e) => e.slug === run.experiment)?.variable;
+  const variantOrder = useMemo(() => new Map(run.variants.map((v, i) => [v.key, i])), [run.variants]);
 
   const refresh = useCallback(() => {
-    Promise.all([
-      api<Analytics>(`/data-collector/analytics?runs=${runId}`),
-      api<Capture[]>(`/data-collector/runs/${runId}/captures`),
-    ])
+    Promise.all([api<Analytics>(`${base}/analytics`), api<Capture[]>(`${base}/captures`)])
       .then(([a, c]) => {
         setData(a);
         setCaptures(c);
       })
       .catch((e: Error) => setError(e.message));
-  }, [runId]);
+  }, [base]);
   useEffect(refresh, [refresh]);
   useInterval(refresh, live ? 10000 : null);
 
@@ -80,22 +83,28 @@ export function RunResults({ runId, live }: { runId: string; live: boolean }) {
     if (!captures) return [];
     const value = (c: Capture) =>
       sort.key === "index"
-        ? c.index
+        ? c.index * 100 + (variantOrder.get(c.variant) ?? 0)
         : sort.key === "worker"
           ? (c.worker ?? -Infinity)
-          : ((c.metrics[sort.key] as number | null | undefined) ?? -Infinity);
+          : sort.key === "variant"
+            ? (variantOrder.get(c.variant) ?? -Infinity) * 1e7 + c.index
+            : ((c.metrics[sort.key] as number | null | undefined) ?? -Infinity);
     return [...captures].sort((a, b) => (value(a) - value(b)) * (sort.desc ? -1 : 1));
-  }, [captures, sort]);
+  }, [captures, sort, variantOrder]);
 
   if (error) return <Alert>{error}</Alert>;
   if (!data || !captures) return <Loading label="Analyzing captures…" />;
 
-  const run = data.runs[0];
-  const s = run.summary;
+  const s = data.summary!;
   // Runs with several workers get a tile comparing them, and a column saying which worker (and GPU) made each capture
   const workers = workerStats(captures);
   const byWorker = workers.length > 1;
-  const series = [{ id: run.id, label: run.model, color: "var(--accent)" }];
+  // One series per variant in the run's order and colors; the Data Collector's single one in the accent color
+  const series: Series[] = variable
+    ? run.variants.map((v, i) => ({ id: v.key, label: variantLabel(run.experiment, v), color: variantColor(i) }))
+    : data.groups.map((g) => ({ id: g.key, label: g.label, color: "var(--accent)" }));
+  const variantOf = new Map(run.variants.map((v, i) => [v.key, { label: variantLabel(run.experiment, v), color: variantColor(i) }]));
+  const compares = comparesText(run);
   const heroFacts: [string, string][] = [
     ["Traffic captured", formatBytes(s.total_bytes)],
     ["Response", s.median_response_chars != null ? `${formatNumber(s.median_response_chars, 0)} chars` : "—"],
@@ -107,6 +116,7 @@ export function RunResults({ runId, live }: { runId: string; live: boolean }) {
   ];
   const headers: { key: SortKey; label: string }[] = [
     { key: "index", label: "Prompt" },
+    ...(variable ? [{ key: "variant" as SortKey, label: variable.one[0].toUpperCase() + variable.one.slice(1) }] : []),
     ...(byWorker ? [{ key: "worker" as SortKey, label: "Worker" }] : []),
     ...COLUMNS,
   ];
@@ -115,7 +125,7 @@ export function RunResults({ runId, live }: { runId: string; live: boolean }) {
   }
 
   function sortBy(key: SortKey) {
-    setSort((cur) => ({ key, desc: cur.key === key ? !cur.desc : key !== "index" }));
+    setSort((cur) => ({ key, desc: cur.key === key ? !cur.desc : key !== "index" && key !== "variant" }));
   }
 
   return (
@@ -125,7 +135,10 @@ export function RunResults({ runId, live }: { runId: string; live: boolean }) {
         <div className="col-span-4 row-span-2 flex flex-col rounded-2xl border border-hairline bg-surface p-6 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
           <div className="text-xs font-medium text-ink-3">Captures</div>
           <div className="mt-2 text-6xl font-semibold tracking-tight tabular-nums">{s.captures.toLocaleString()}</div>
-          <div className="mt-1 truncate text-sm text-ink-2">{modelName(run.model)}</div>
+          <div className="mt-1 truncate text-sm text-ink-2" title={run.models.join(", ")}>
+            {run.models.map(modelName).join(", ")}
+          </div>
+          {compares && <div className="truncate text-xs text-ink-3">{compares}</div>}
           <dl className="mt-auto divide-y divide-[var(--hairline)] pt-6 text-sm">
             {heroFacts.map(([k, v]) => (
               <div key={k} className="flex justify-between gap-3 py-2">
@@ -134,7 +147,9 @@ export function RunResults({ runId, live }: { runId: string; live: boolean }) {
               </div>
             ))}
           </dl>
-          <div className="pt-1 text-[11px] text-ink-3">Medians over all captures</div>
+          <div className="pt-1 text-[11px] text-ink-3">
+            Medians over all captures{variable ? `, every ${variable.one} together` : ""}
+          </div>
         </div>
         <StatTile className="col-span-2" label="First event" value={formatMs(s.median_ttft_ms)} hint="median" />
         <StatTile
@@ -150,9 +165,20 @@ export function RunResults({ runId, live }: { runId: string; live: boolean }) {
           value={s.median_packet_bytes != null ? `${s.median_packet_bytes} B` : "—"}
           hint="median payload"
         />
-        <GapChart data={data} series={series} height={230} className="col-span-8" />
-        <CategoryChart data={data} series={series} height={240} className="col-span-7" />
-        <SizeChart data={data} series={series} height={240} className="col-span-5" />
+        {variable ? (
+          <>
+            <CompareChart data={data} series={series} variable={variable.one} height={200} className="col-span-8" />
+            <GapChart data={data} series={series} height={240} className="col-span-7" />
+            <SizeChart data={data} series={series} height={240} className="col-span-5" />
+            <CategoryChart data={data} series={series} height={240} className="col-span-12" />
+          </>
+        ) : (
+          <>
+            <GapChart data={data} series={series} height={230} className="col-span-8" />
+            <CategoryChart data={data} series={series} height={240} className="col-span-7" />
+            <SizeChart data={data} series={series} height={240} className="col-span-5" />
+          </>
+        )}
         {byWorker && <WorkersTile workers={workers} total={captures.length} className="col-span-12" />}
       </div>
 
@@ -179,12 +205,20 @@ export function RunResults({ runId, live }: { runId: string; live: boolean }) {
             </thead>
             <tbody className="divide-y divide-[var(--hairline)] tabular-nums">
               {sorted.slice(0, shown).map((c) => (
-                <tr key={c.index} onClick={() => setOpen(c.index)} className="cursor-pointer hover:bg-surface-2/60">
+                <tr key={c.key} onClick={() => setOpen(c.key)} className="cursor-pointer hover:bg-surface-2/60">
                   <td className="py-2 pr-3 pl-5 whitespace-nowrap">
                     <span className="font-medium">#{String(c.prompt).padStart(2, "0")}</span>
                     {c.iteration != null && <span className="text-ink-3"> · {c.iteration}</span>}
                     <div className="text-xs text-ink-3">{c.category}</div>
                   </td>
+                  {variable && (
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      <span className="flex max-w-56 items-center gap-2">
+                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: variantOf.get(c.variant)?.color }} />
+                        <span className="truncate">{variantOf.get(c.variant)?.label ?? c.variant}</span>
+                      </span>
+                    </td>
+                  )}
                   {byWorker && (
                     <td className="px-3 py-2 whitespace-nowrap">
                       {c.worker != null ? (
@@ -218,7 +252,7 @@ export function RunResults({ runId, live }: { runId: string; live: boolean }) {
         )}
       </div>
 
-      {open !== null && <CaptureDrawer runId={runId} index={open} onClose={() => setOpen(null)} />}
+      {open !== null && <CaptureDrawer run={run} captureKey={open} onClose={() => setOpen(null)} />}
     </div>
   );
 }

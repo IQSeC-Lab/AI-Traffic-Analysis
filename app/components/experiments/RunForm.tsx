@@ -3,25 +3,51 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Check } from "lucide-react";
+import { Check, X } from "lucide-react";
 
 import {
   api,
   type LocalModel,
   type ModelsResponse,
+  type NetworkCondition,
   type Prompt,
   type PromptLibrary,
   type Run,
   type RunConfig,
   type SystemInfo,
 } from "@/lib/api";
-import { runHref } from "@/lib/experiments";
+import { EXPERIMENTS, runHref } from "@/lib/experiments";
 import { formatBytes } from "@/lib/format";
 import { Alert, ButtonLink, Field, Loading, Segmented, Spinner, buttonClass, inputClass } from "@/components/ui";
 import { PromptDialog } from "@/components/prompts/PromptDialog";
+import { variantColor } from "./RunBadge";
 
 // What the experiment API accepts as `model`: the repo id when known, else the folder name.
 const modelRef = (m: LocalModel) => m.model ?? m.folder;
+
+// A run compares at most 8 temperatures, models or network conditions: one chart color each.
+const MAX_VARIANTS = 8;
+const TEMPERATURE_PRESETS = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.2, 1.5, 2];
+// 6-Delay's r1.py used 500 ms with 50 ms of jitter; no delay is the baseline to compare against.
+const DEFAULT_CONDITIONS: NetworkCondition[] = [
+  { delay_ms: 0, jitter_ms: 0, distribution: "normal" },
+  { delay_ms: 500, jitter_ms: 50, distribution: "normal" },
+];
+const DISTRIBUTIONS: NetworkCondition["distribution"][] = ["normal", "pareto", "paretonormal"];
+
+/** How a network condition is named, as the API labels it. */
+function conditionLabel(c: NetworkCondition) {
+  if (!c.delay_ms) return c.jitter_ms ? `${c.jitter_ms} ms jitter` : "No delay";
+  return c.jitter_ms ? `${c.delay_ms} ms ± ${c.jitter_ms} ms, ${c.distribution}` : `${c.delay_ms} ms`;
+}
+
+/** Why a network condition can't run, if it can't: jitter without delay, or a duplicate of an earlier one. */
+function conditionProblem(conditions: NetworkCondition[], i: number): string | null {
+  const c = conditions[i];
+  if (c.jitter_ms && !c.delay_ms) return "Jitter needs a delay.";
+  const same = conditions.findIndex((o) => conditionLabel(o) === conditionLabel(c));
+  return same < i ? `Same as condition ${same + 1}.` : null;
+}
 
 function Section({
   title,
@@ -41,7 +67,7 @@ function Section({
           <h2 className="text-sm font-semibold">{title}</h2>
           {description && <p className="text-xs text-ink-3">{description}</p>}
         </div>
-        {action}
+        {action && <div className="shrink-0">{action}</div>}
       </div>
       {children}
     </section>
@@ -83,14 +109,20 @@ function SelectCard({
   );
 }
 
-export function DataCollectorForm() {
+export function RunForm({ experiment }: { experiment: string }) {
   const router = useRouter();
+  const info = EXPERIMENTS.find((e) => e.slug === experiment);
+  const multiModel = experiment === "scalability";
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [models, setModels] = useState<LocalModel[] | null>(null);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [activeRuns, setActiveRuns] = useState<Run[]>([]);
 
   const [model, setModel] = useState("");
+  const [modelsChosen, setModelsChosen] = useState<string[]>([]); // Scalability: the models compared
+  const [temperatures, setTemperatures] = useState<number[]>([0.3, 0.7, 0.9]);
+  const [customTemperature, setCustomTemperature] = useState("");
+  const [conditions, setConditions] = useState<NetworkCondition[]>(DEFAULT_CONDITIONS);
   const [gpuMode, setGpuMode] = useState<"auto" | "manual" | "cpu">("auto");
   const [gpus, setGpus] = useState<number[]>([]); // when choosing GPUs by hand
   const [split, setSplit] = useState(false); // chosen GPUs: split one copy across them instead of one copy each
@@ -98,7 +130,7 @@ export function DataCollectorForm() {
   const [perGpu, setPerGpu] = useState(1); // chosen GPUs, one copy each: workers on every GPU
   const [name, setName] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [repeat, setRepeat] = useState(1);
+  const [repeat, setRepeat] = useState(info?.defaults?.repeat ?? 1);
   const [maxTokens, setMaxTokens] = useState(2048);
 
   const [starting, setStarting] = useState(false);
@@ -110,22 +142,28 @@ export function DataCollectorForm() {
       api<SystemInfo>("/system"),
       api<ModelsResponse>("/settings/models"),
       api<PromptLibrary>("/prompts"),
-      api<Run[]>("/data-collector/active"),
+      api<Run[]>("/experiments/active"),
     ])
       .then(([sys, downloaded, library, active]) => {
         const ready = downloaded.models.filter((m) => m.complete && !m.downloading);
+        // Scalability goes from the smallest model to the largest, so its charts read that way too
+        if (multiModel) ready.sort((a, b) => a.size_bytes - b.size_bytes);
         setSystem(sys);
         setModels(ready);
         setModel(ready[0] ? modelRef(ready[0]) : "");
+        setModelsChosen(ready[0] ? [modelRef(ready[0])] : []);
         // Several GPUs: one copy of the model on each, dividing the prompts, unless the user picks otherwise
         setGpuMode(sys.gpus.length > 1 ? "manual" : sys.gpus.length > 0 ? "auto" : "cpu");
         setGpus(sys.gpus.map((g) => g.index));
         setPrompts(library.prompts);
-        setSelected(new Set(library.prompts.map((p) => p.number)));
+        // The original experiment's prompts when it used one category, otherwise all of them
+        const category = info?.defaults?.category;
+        const preset = library.prompts.filter((p) => p.category === category);
+        setSelected(new Set((preset.length ? preset : library.prompts).map((p) => p.number)));
         setActiveRuns(active);
       })
       .catch((e: Error) => setError(e.message));
-  }, []);
+  }, [multiModel, info]);
 
   const categories = useMemo(() => {
     const groups = new Map<string, Prompt[]>();
@@ -141,6 +179,32 @@ export function DataCollectorForm() {
     );
   }
 
+  function toggleModel(ref: string) {
+    // Kept in list order (smallest first), which is the order the run compares them in
+    setModelsChosen((current) =>
+      current.includes(ref)
+        ? current.filter((m) => m !== ref)
+        : (models ?? []).map(modelRef).filter((m) => m === ref || current.includes(m)),
+    );
+  }
+
+  function toggleTemperature(t: number) {
+    setTemperatures((current) =>
+      current.includes(t) ? current.filter((x) => x !== t) : [...current, t].sort((a, b) => a - b),
+    );
+  }
+
+  function addCustomTemperature() {
+    const t = Math.round(Number(customTemperature) * 100) / 100;
+    if (customTemperature.trim() === "" || !(t >= 0 && t <= 2)) return;
+    if (!temperatures.includes(t)) toggleTemperature(t);
+    setCustomTemperature("");
+  }
+
+  function updateCondition(i: number, change: Partial<NetworkCondition>) {
+    setConditions((current) => current.map((c, j) => (j === i ? { ...c, ...change } : c)));
+  }
+
   function togglePrompts(numbers: number[]) {
     setSelected((current) => {
       const next = new Set(current);
@@ -150,20 +214,36 @@ export function DataCollectorForm() {
     });
   }
 
+  // How many temperatures, models or network conditions: every prompt is captured once per variant
+  const variantCount =
+    experiment === "temperature-change"
+      ? temperatures.length
+      : multiModel
+        ? modelsChosen.length
+        : experiment === "delay"
+          ? conditions.length
+          : 1;
+  const variantsOk =
+    variantCount >= 1 &&
+    variantCount <= MAX_VARIANTS &&
+    (experiment !== "delay" || conditions.every((_, i) => !conditionProblem(conditions, i)));
+
   const onGpu = gpuMode !== "cpu" && (system?.gpus.length ?? 0) > 0;
   const splitting = onGpu && gpuMode === "manual" && split && gpus.length > 1;
   const perGpuMode = onGpu && gpuMode === "manual" && !splitting;
   // The API also caps workers at the number of captures: a worker without prompts would only hold memory
   const workerCount = Math.max(
     1,
-    Math.min(perGpuMode ? Math.max(1, gpus.length) * perGpu : workers, selected.size * Math.max(1, repeat)),
+    Math.min(perGpuMode ? Math.max(1, gpus.length) * perGpu : workers, selected.size * Math.max(1, repeat) * Math.max(1, variantCount)),
   );
 
   async function start() {
     setStarting(true);
     setError(null);
     const config: Partial<RunConfig> = {
-      model,
+      ...(multiModel ? { models: modelsChosen } : { model }),
+      ...(experiment === "temperature-change" && { temperatures }),
+      ...(experiment === "delay" && { conditions }),
       gpus: !onGpu ? [] : gpuMode === "auto" ? "auto" : gpus,
       split_model: splitting,
       workers: workerCount,
@@ -173,8 +253,8 @@ export function DataCollectorForm() {
       max_tokens: maxTokens,
     };
     try {
-      const run = await api<Run>("/data-collector/runs", { method: "POST", body: JSON.stringify(config) });
-      router.push(runHref(run.id));
+      const run = await api<Run>(`/${experiment}/runs`, { method: "POST", body: JSON.stringify(config) });
+      router.push(runHref(run));
     } catch (e) {
       setError((e as Error).message);
       setStarting(false);
@@ -185,8 +265,18 @@ export function DataCollectorForm() {
     return error ? <Alert>{error}</Alert> : <Loading label="Detecting GPUs and models…" />;
   }
 
-  const total = selected.size * Math.max(1, repeat);
-  const needMb = models.find((m) => modelRef(m) === model)?.gpu_memory_mb ?? null;
+  const total = selected.size * Math.max(1, repeat) * variantCount;
+  // Workers load one model at a time, so a run of several reserves room for the largest
+  const chosen = models.filter((m) => (multiModel ? modelsChosen.includes(modelRef(m)) : modelRef(m) === model));
+  const needMb = chosen.some((m) => m.gpu_memory_mb != null) ? Math.max(...chosen.map((m) => m.gpu_memory_mb ?? 0)) : null;
+  const shortName = (ref: string) => ref.split("/").pop() ?? ref;
+  const modelText = multiModel
+    ? modelsChosen.length === 1
+      ? shortName(modelsChosen[0])
+      : `${modelsChosen.length} models`
+    : model
+      ? shortName(model)
+      : "—";
   const gb = (mb: number) => `${(mb / 1024).toFixed(1)} GB`;
   const hardware = !onGpu
     ? "CPU"
@@ -210,15 +300,24 @@ export function DataCollectorForm() {
     ? system.gpus.filter((g) => gpus.includes(g.index) && g.memory_total_mb != null && needMb > g.memory_total_mb * 0.95)
     : [];
   const canStart =
-    system.docker.available && model && selected.size > 0 && !starting && !(onGpu && gpuMode === "manual" && gpus.length === 0);
+    system.docker.available &&
+    (multiModel ? modelsChosen.length > 0 : model) &&
+    variantsOk &&
+    selected.size > 0 &&
+    !starting &&
+    !(onGpu && gpuMode === "manual" && gpus.length === 0);
   const selectedCategories = categories.filter(([, items]) => items.some((p) => selected.has(p.number))).length;
 
   return (
     <div className="grid items-start gap-6 lg:grid-cols-[1fr_20rem]">
       <div className="space-y-6">
         <Section
-          title="Model"
-          description="Models downloaded on this machine."
+          title={multiModel ? "Models" : "Model"}
+          description={
+            multiModel
+              ? `Models downloaded on this machine, smallest first. Pick up to ${MAX_VARIANTS}: every one gets the same prompts, so the model is the only thing that changes.`
+              : "Models downloaded on this machine."
+          }
           action={
             <ButtonLink href="/settings#models" variant="secondary" size="sm">
               Download more
@@ -227,14 +326,29 @@ export function DataCollectorForm() {
         >
           {models.length > 0 ? (
             <div className="grid gap-2 sm:grid-cols-2">
-              {models.map((m) => (
-                <SelectCard key={m.folder} selected={model === modelRef(m)} onClick={() => setModel(modelRef(m))}>
-                  <div className="truncate pr-6 text-sm font-medium">{modelRef(m).split("/").pop()}</div>
-                  <div className="mt-0.5 truncate text-xs text-ink-3">
-                    {m.model?.split("/")[0] ?? "local"} · {formatBytes(m.size_bytes)}
-                  </div>
-                </SelectCard>
-              ))}
+              {models.map((m) => {
+                const ref = modelRef(m);
+                const picked = multiModel ? modelsChosen.includes(ref) : model === ref;
+                const full = multiModel && !picked && modelsChosen.length >= MAX_VARIANTS;
+                const color = multiModel && picked ? variantColor(modelsChosen.indexOf(ref)) : null;
+                return (
+                  <SelectCard
+                    key={m.folder}
+                    role={multiModel ? "checkbox" : "radio"}
+                    selected={picked}
+                    onClick={() => (multiModel ? !full && toggleModel(ref) : setModel(ref))}
+                  >
+                    <div className={`flex items-center gap-2 pr-6 text-sm font-medium ${full ? "text-ink-3" : ""}`}>
+                      {color && <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />}
+                      <span className="truncate">{ref.split("/").pop()}</span>
+                    </div>
+                    <div className="mt-0.5 truncate text-xs text-ink-3">
+                      {m.model?.split("/")[0] ?? "local"} · {formatBytes(m.size_bytes)}
+                      {multiModel && m.gpu_memory_mb != null && ` · ~${gb(m.gpu_memory_mb)} GPU`}
+                    </div>
+                  </SelectCard>
+                );
+              })}
             </div>
           ) : (
             <Alert tone="warning">
@@ -245,7 +359,160 @@ export function DataCollectorForm() {
               .
             </Alert>
           )}
+          {multiModel && modelsChosen.length === 0 && models.length > 0 && (
+            <p className="mt-3 text-xs text-critical-text">Pick at least one model.</p>
+          )}
         </Section>
+
+        {experiment === "temperature-change" && (
+          <Section
+            title="Temperatures"
+            description={`Every prompt is captured once at each temperature. Pick up to ${MAX_VARIANTS}.`}
+          >
+            <div className="flex flex-wrap gap-1.5">
+              {[...new Set([...TEMPERATURE_PRESETS, ...temperatures])]
+                .sort((a, b) => a - b)
+                .map((t) => {
+                  const on = temperatures.includes(t);
+                  const full = !on && temperatures.length >= MAX_VARIANTS;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      aria-pressed={on}
+                      disabled={full}
+                      onClick={() => toggleTemperature(t)}
+                      className={`h-8 min-w-12 rounded-lg px-2.5 text-sm font-medium tabular-nums transition-colors disabled:cursor-not-allowed ${
+                        on ? "bg-accent-strong text-white shadow-sm" : "bg-surface-2 text-ink-2 hover:text-ink disabled:text-ink-3"
+                      }`}
+                    >
+                      {t}
+                    </button>
+                  );
+                })}
+            </div>
+            <form
+              className="mt-4 flex items-end gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                addCustomTemperature();
+              }}
+            >
+              <div className="w-40">
+                <Field label="Another value">
+                  <input
+                    type="number"
+                    min={0}
+                    max={2}
+                    step={0.05}
+                    value={customTemperature}
+                    onChange={(e) => setCustomTemperature(e.target.value)}
+                    placeholder="0 to 2"
+                    className={inputClass}
+                  />
+                </Field>
+              </div>
+              <button type="submit" disabled={temperatures.length >= MAX_VARIANTS} className={buttonClass("secondary")}>
+                Add
+              </button>
+            </form>
+            <p className="mt-3 text-xs text-ink-3">
+              0 is greedy decoding: always the most likely token, so repeated captures of a prompt give the same response.
+              The other experiments sample at 0.7. Above 1 the text gets more and more random.
+            </p>
+            {temperatures.length === 0 && <p className="mt-2 text-xs text-critical-text">Pick at least one temperature.</p>}
+          </Section>
+        )}
+
+        {experiment === "delay" && (
+          <Section
+            title="Network conditions"
+            description="tc netem delays everything the inference server sends, the response stream included, before the capture starts. Every prompt is captured once under each condition."
+            action={
+              <button
+                type="button"
+                disabled={conditions.length >= MAX_VARIANTS}
+                onClick={() => setConditions((c) => [...c, { delay_ms: 100, jitter_ms: 10, distribution: "normal" }])}
+                className={buttonClass("secondary", "sm")}
+              >
+                Add condition
+              </button>
+            }
+          >
+            <div className="space-y-2">
+              <div className="grid grid-cols-[1.25rem_7rem_7rem_9rem_1fr_2rem] gap-3 px-1 text-xs font-medium text-ink-3">
+                <span />
+                <span>Delay (ms)</span>
+                <span>Jitter (ms)</span>
+                <span>Jitter shape</span>
+                <span />
+                <span />
+              </div>
+              {conditions.map((c, i) => {
+                const problem = conditionProblem(conditions, i);
+                return (
+                  <div
+                    key={i}
+                    className="grid grid-cols-[1.25rem_7rem_7rem_9rem_1fr_2rem] items-center gap-3 rounded-xl border border-hairline px-1 py-2"
+                  >
+                    <span className="flex justify-center">
+                      <span className="h-2 w-2 rounded-full" style={{ background: variantColor(i) }} />
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={10000}
+                      value={c.delay_ms}
+                      onChange={(e) => updateCondition(i, { delay_ms: Math.min(10000, Math.max(0, Math.round(Number(e.target.value) || 0))) })}
+                      className={inputClass}
+                      aria-label={`Delay of condition ${i + 1}, in milliseconds`}
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      max={10000}
+                      value={c.jitter_ms}
+                      onChange={(e) => updateCondition(i, { jitter_ms: Math.min(10000, Math.max(0, Math.round(Number(e.target.value) || 0))) })}
+                      className={inputClass}
+                      aria-label={`Jitter of condition ${i + 1}, in milliseconds`}
+                    />
+                    <select
+                      value={c.distribution}
+                      disabled={!c.jitter_ms}
+                      onChange={(e) => updateCondition(i, { distribution: e.target.value as NetworkCondition["distribution"] })}
+                      className={`${inputClass} disabled:text-ink-3`}
+                      aria-label={`Jitter distribution of condition ${i + 1}`}
+                    >
+                      {DISTRIBUTIONS.map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
+                    <span className={`truncate text-sm ${problem ? "text-critical-text" : "text-ink-2"}`}>
+                      {problem ?? conditionLabel(c)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setConditions((cur) => cur.filter((_, j) => j !== i))}
+                      disabled={conditions.length === 1}
+                      className="flex h-8 w-8 items-center justify-center rounded-lg text-ink-3 hover:bg-surface-2 hover:text-critical-text disabled:invisible"
+                      aria-label={`Remove condition ${i + 1}`}
+                      title="Remove"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="mt-3 text-xs text-ink-3">
+              Keep a condition with no delay to compare against. Jitter varies each packet&apos;s delay around the set
+              value, following the chosen distribution. The host kernel needs the sch_netem module (
+              <code className="text-ink-2">sudo modprobe sch_netem</code>).
+            </p>
+          </Section>
+        )}
 
         <Section
           title="Hardware"
@@ -326,7 +593,7 @@ export function DataCollectorForm() {
               )}
               {tooSmall.length > 0 && needMb != null && (
                 <Alert tone="warning">
-                  The model needs about {gb(needMb)}, more than GPU {tooSmall.map((g) => g.index).join(", ")} can hold on
+                  The {multiModel && modelsChosen.length > 1 ? "largest model" : "model"} needs about {gb(needMb)}, more than GPU {tooSmall.map((g) => g.index).join(", ")} can hold on
                   its own.{" "}
                   {gpus.length > 1 ? (
                     <button type="button" onClick={() => setSplit(true)} className="font-medium text-ink underline">
@@ -368,7 +635,7 @@ export function DataCollectorForm() {
               <p>
                 Each worker runs its own copy of the model with its own containers, network and packet capture.
                 {workerCount > 1
-                  ? ` The prompts are divided between them: ${total} capture${total === 1 ? "" : "s"} over ${workerCount} workers is ${shareText} each, so they finish up to ${workerCount}× sooner.`
+                  ? ` The captures are divided between them: ${total} capture${total === 1 ? "" : "s"} over ${workerCount} workers is ${shareText} each, so they finish up to ${workerCount}× sooner.`
                   : gpuMode === "auto" && system.gpus.length > 1
                     ? ` With ${system.gpus.length} workers, each GPU runs its own copy and the prompts are divided between them.`
                     : " Add workers to finish sooner."}
@@ -377,6 +644,7 @@ export function DataCollectorForm() {
                 <p>
                   Needs about <span className="font-medium text-ink-2">{gb(perGpuNeed)}</span> of GPU memory
                   {gpuMode === "auto" ? " per worker" : " on each selected GPU"}
+                  {multiModel && modelsChosen.length > 1 && ", enough for the largest model"}
                   {workerCount > 1 && needMb != null && (
                     <>
                       , <span className="font-medium text-ink-2">{gb(needMb * workerCount)}</span> in total
@@ -497,10 +765,21 @@ export function DataCollectorForm() {
               <span className="text-4xl font-semibold tracking-tight tabular-nums">{total.toLocaleString()}</span>
               <span className="text-sm text-ink-2">capture{total === 1 ? "" : "s"}</span>
             </div>
+            {info?.variable && (
+              <div className="mt-1 text-xs text-ink-3 tabular-nums">
+                {selected.size} prompt{selected.size === 1 ? "" : "s"}
+                {repeat > 1 && ` × ${repeat}`} × {variantCount} {variantCount === 1 ? info.variable.one : info.variable.many}
+              </div>
+            )}
           </div>
           <dl className="divide-y divide-[var(--hairline)] px-5 text-sm">
             {[
-              ["Model", model ? model.split("/").pop() : "—"],
+              [multiModel ? "Models" : "Model", modelText],
+              ...(experiment === "temperature-change"
+                ? [["Temperatures", temperatures.length ? temperatures.join(", ") : "—"]]
+                : experiment === "delay"
+                  ? [["Conditions", `${conditions.length}`]]
+                  : []),
               ["Hardware", hardware],
               ["Workers", workerCount > 1 ? `${workerCount} · ${shareText} captures each` : "1"],
               ...(onGpu && needMb != null ? [["GPU memory", `~${gb(needMb * workerCount)}`]] : []),
@@ -520,7 +799,13 @@ export function DataCollectorForm() {
                 value={name}
                 maxLength={60}
                 onChange={(e) => setName(e.target.value)}
-                placeholder={model ? `${model.split("/").pop()} baseline` : "e.g. Qwen baseline"}
+                placeholder={
+                  multiModel
+                    ? "e.g. 7B models"
+                    : model
+                      ? `${shortName(model)} ${experiment === "temperature-change" ? "temperature sweep" : experiment === "delay" ? "under delay" : "baseline"}`
+                      : "e.g. Qwen baseline"
+                }
                 className={inputClass}
               />
             </Field>

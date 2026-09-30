@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { api, isActive, type ModelsResponse, type Run, type SystemInfo } from "@/lib/api";
-import { EXPERIMENTS, experimentHref, runHref } from "@/lib/experiments";
+import { EXPERIMENTS, experimentHref, experimentName, runHref } from "@/lib/experiments";
 import { formatBytes, timeAgo } from "@/lib/format";
 import { useInterval } from "@/lib/useInterval";
 import { ButtonLink, Card, LiveDot, ProgressBar, StatTile, StatusPill } from "@/components/ui";
@@ -17,7 +17,7 @@ export function Overview() {
   const [now, setNow] = useState(() => Date.now());
 
   const refreshRuns = useCallback(() => {
-    api<Run[]>("/data-collector/runs")
+    api<Run[]>("/experiments/runs")
       .then((r) => {
         setRuns(r);
         setNow(Date.now());
@@ -61,7 +61,7 @@ export function Overview() {
             {active.map((run) => (
               <Link
                 key={run.id}
-                href={runHref(run.id)}
+                href={runHref(run)}
                 className="block rounded-2xl border border-hairline bg-surface p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)] transition-colors hover:border-axis"
               >
                 <div className="flex items-start justify-between gap-3">
@@ -69,6 +69,7 @@ export function Overview() {
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-semibold">{runTitle(run)}</div>
                     <div className="truncate text-xs text-ink-3">
+                      {experimentName(run.experiment)} ·{" "}
                       {run.status === "queued" ? run.queue?.reason ?? "Waiting in the queue" : run.step ?? "Starting…"}
                     </div>
                   </div>
@@ -143,25 +144,18 @@ export function Overview() {
           </div>
         </Card>
 
-        <Card
-          title="Recent runs"
-          action={
-            <Link href={experimentHref("data-collector")} className="text-xs font-medium text-accent hover:underline">
-              View all
-            </Link>
-          }
-          padded={false}
-        >
+        <Card title="Recent runs" description="Of every experiment. Each experiment's page lists all its runs." padded={false}>
           {runs && runs.length === 0 && <p className="px-5 pb-5 text-sm text-ink-3">No runs yet.</p>}
           <ul className="divide-y divide-[var(--hairline)]">
             {runs?.slice(0, 5).map((r) => (
               <li key={r.id}>
-                <Link href={runHref(r.id)} className="flex items-center gap-3 px-5 py-3 hover:bg-surface-2/60">
+                <Link href={runHref(r)} className="flex items-center gap-3 px-5 py-3 hover:bg-surface-2/60">
                   <RunBadge number={r.number} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium">{runTitle(r)}</div>
                     <div className="text-xs text-ink-3">
-                      Data Collector · {r.progress.completed}/{r.progress.total} captures · {timeAgo(r.created_at, now)}
+                      {experimentName(r.experiment)} · {r.progress.completed}/{r.progress.total} captures ·{" "}
+                      {timeAgo(r.created_at, now)}
                     </div>
                   </div>
                   <StatusPill status={r.status} />

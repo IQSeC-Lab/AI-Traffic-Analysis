@@ -58,7 +58,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const [system, setSystem] = useState<SystemInfo | null>(null);
 
   const refresh = useCallback(() => {
-    api<Run[]>("/data-collector/active").then(setActive).catch(() => {});
+    api<Run[]>("/experiments/active").then(setActive).catch(() => {});
   }, []);
   useEffect(refresh, [refresh, pathname]);
   useInterval(refresh, 4000);
@@ -86,7 +86,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         <div className="px-2.5 pb-1.5 text-[11px] font-medium tracking-wide text-ink-3 uppercase">Experiments</div>
         {EXPERIMENTS.map((e) => {
           const href = experimentHref(e.slug);
-          const running = e.slug === "data-collector" && active.some((r) => r.status !== "queued");
+          const running = active.some((r) => r.experiment === e.slug && r.status !== "queued");
           return (
             <NavItem
               key={e.slug}
@@ -124,7 +124,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               )}
             </div>
             {active.slice(0, 4).map((run) => (
-              <Link key={run.id} href={runHref(run.id)} className="block rounded-lg px-1.5 py-1.5 hover:bg-surface-2">
+              <Link key={run.id} href={runHref(run)} className="block rounded-lg px-1.5 py-1.5 hover:bg-surface-2">
                 <div className="flex items-center justify-between gap-2 text-[11px]">
                   <span className="flex min-w-0 items-center gap-1.5">
                     <RunBadge number={run.number} />
