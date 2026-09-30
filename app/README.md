@@ -33,6 +33,8 @@ npm install
 npm run setup:api   # creates .venv and installs the Python dependencies
 ```
 
+To use another Python environment instead (e.g. conda), install the dependencies there with `pip install -r api/requirements.txt` and set `PYTHON` to its interpreter when starting: `PYTHON=python npm run dev`.
+
 ## Run
 
 ```bash
@@ -116,5 +118,6 @@ Nothing without that label is touched. If the API process dies mid-run, the next
 | `MALLM_MODELS_DIR` | `models/`               | Downloaded models. Point it at an existing models folder to reuse it. |
 | `MALLM_DATA_DIR`   | `data/`                 | Settings, prompts, and experiment outputs unless another results folder is set in Settings. |
 | `HF_TOKEN`         | none                    | HuggingFace token, used when none is saved in Settings.        |
+| `PYTHON` | `.venv/bin/python` | Python that runs the FastAPI backend. Set it to use a conda or other environment, e.g. `PYTHON=python` after `conda activate`. |
 | `API_PORT` | `8000` | Port of the FastAPI backend. Used by the `dev:api`/`start:api` scripts *and* by Next.js to forward `/api/*`, so set it for both (e.g. `API_PORT=8007 npm run dev`). |
 | `API_URL` | `http://127.0.0.1:$API_PORT` | Full address Next.js forwards `/api/*` to, if the backend is on another host. Read at build time for `next build`. |
