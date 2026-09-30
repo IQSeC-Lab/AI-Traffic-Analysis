@@ -5,5 +5,9 @@ import { PromptLibraryView } from "@/components/prompts/PromptLibraryView";
 export const metadata: Metadata = { title: "Prompts" };
 
 export default function PromptsPage() {
-  return <PromptLibraryView />;
+  return (
+    <div className="max-w-5xl">
+      <PromptLibraryView />
+    </div>
+  );
 }

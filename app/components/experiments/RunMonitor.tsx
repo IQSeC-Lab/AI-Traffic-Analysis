@@ -66,82 +66,110 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
               Waiting in the queue{run.queue?.position ? ` · #${run.queue.position}` : ""}
             </div>
             <p className="mt-0.5 text-sm text-ink-2">{run.queue?.reason ?? "Waiting for hardware to free up."}</p>
-            <p className="mt-1 text-xs text-ink-3">It starts on its own as soon as there is room. You can cancel it meanwhile.</p>
+            <p className="mt-1 text-xs text-ink-3">
+              It starts on its own as soon as there is room. You can cancel it meanwhile.
+            </p>
           </div>
         </div>
       )}
 
-      <Card>
-        <div className="grid gap-6 lg:grid-cols-[1fr_auto] lg:items-end">
-          <div>
-            <div className="text-xs font-medium text-ink-3">Progress</div>
-            <div className="mt-1 flex items-baseline gap-3">
-              <span className="text-5xl font-semibold tracking-tight">{pct}%</span>
-              <span className="text-sm text-ink-3 tabular-nums">
-                {completed} of {total} captures
-              </span>
+      <div className="grid grid-cols-12 gap-4">
+        <Card className="col-span-8">
+          <div className="grid gap-6 lg:grid-cols-[1fr_auto] lg:items-end">
+            <div>
+              <div className="text-xs font-medium text-ink-3">Progress</div>
+              <div className="mt-1 flex items-baseline gap-3">
+                <span className="text-5xl font-semibold tracking-tight">{pct}%</span>
+                <span className="text-sm text-ink-3 tabular-nums">
+                  {completed} of {total} captures
+                </span>
+              </div>
             </div>
+            {eta != null && (
+              <div className="text-sm text-ink-3 lg:text-right">
+                About <span className="font-medium text-ink">{formatDuration(eta)}</span> left
+              </div>
+            )}
           </div>
-          {eta != null && (
-            <div className="text-sm text-ink-3 lg:text-right">
-              About <span className="font-medium text-ink">{formatDuration(eta)}</span> left
+          <div className="mt-4">
+            <ProgressBar value={completed} max={total} tone={run.status === "completed" ? "good" : "accent"} />
+          </div>
+
+          <ol className="mt-6 grid grid-cols-4 gap-3">
+            {PHASES.map((name, i) => {
+              const state = i < phase ? "done" : i === phase ? "current" : "todo";
+              return (
+                <li key={name} className="flex items-center gap-2.5">
+                  <span
+                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ring-1 ring-inset ${
+                      state === "todo"
+                        ? "bg-surface-2 text-ink-3 ring-[var(--hairline)]"
+                        : state === "current" && active
+                          ? "bg-accent-strong text-white ring-accent-strong"
+                          : "bg-accent-wash text-accent ring-accent/30"
+                    }`}
+                  >
+                    {state === "done" || (!active && i === phase) ? (
+                      <Check className="h-4 w-4" strokeWidth={2.5} />
+                    ) : (
+                      <span className="text-xs font-semibold">{i + 1}</span>
+                    )}
+                  </span>
+                  <span className={`hidden text-sm sm:block ${state === "todo" ? "text-ink-3" : "font-medium"}`}>
+                    {name}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+
+          {active && run.status !== "queued" && (workers.length <= 1 || phase !== 1) && (
+            <div className="mt-6 flex items-center gap-3 rounded-xl bg-surface-2 px-4 py-3 text-sm">
+              <Spinner className="h-4 w-4 text-accent" />
+              <div className="min-w-0">
+                {run.current && <PromptLabel current={run.current} repeat={run.config.repeat} />}
+                <span className="text-ink-2">
+                  {run.status === "cancelling" ? "Cancelling…" : (run.step ?? "Starting…")}
+                </span>
+              </div>
             </div>
           )}
-        </div>
-        <div className="mt-4">
-          <ProgressBar value={completed} max={total} tone={run.status === "completed" ? "good" : "accent"} />
-        </div>
+        </Card>
 
-        <ol className="mt-6 grid grid-cols-4 gap-3">
-          {PHASES.map((name, i) => {
-            const state = i < phase ? "done" : i === phase ? "current" : "todo";
-            return (
-              <li key={name} className="flex items-center gap-2.5">
-                <span
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ring-1 ring-inset ${
-                    state === "todo"
-                      ? "bg-surface-2 text-ink-3 ring-[var(--hairline)]"
-                      : state === "current" && active
-                        ? "bg-accent-strong text-white ring-accent-strong"
-                        : "bg-accent-wash text-accent ring-accent/30"
-                  }`}
-                >
-                  {state === "done" || (!active && i === phase) ? <Check className="h-4 w-4" strokeWidth={2.5} /> : <span className="text-xs font-semibold">{i + 1}</span>}
-                </span>
-                <span className={`hidden text-sm sm:block ${state === "todo" ? "text-ink-3" : "font-medium"}`}>{name}</span>
-              </li>
-            );
-          })}
-        </ol>
-
-        {active && run.status !== "queued" && (workers.length <= 1 || phase !== 1) && (
-          <div className="mt-6 flex items-center gap-3 rounded-xl bg-surface-2 px-4 py-3 text-sm">
-            <Spinner className="h-4 w-4 text-accent" />
-            <div className="min-w-0">
-              {run.current && <PromptLabel current={run.current} repeat={run.config.repeat} />}
-              <span className="text-ink-2">{run.status === "cancelling" ? "Cancelling…" : run.step ?? "Starting…"}</span>
-            </div>
-          </div>
-        )}
+        <div className="col-span-4 grid grid-cols-2 grid-rows-2 gap-4">
+          <StatTile label="Elapsed" value={formatDuration(end - started)} />
+          <StatTile
+            label="PCAPs"
+            value={run.outputs.pcaps.toLocaleString()}
+            hint={formatBytes(run.outputs.pcap_bytes)}
+          />
+          <StatTile
+            label="Hardware"
+            // Many GPUs don't fit a tile; the full list is in the header and on each worker
+            value={(run.assigned_gpus?.length ?? 0) > 2 ? `${run.assigned_gpus!.length} GPUs` : hardwareLabel(run)}
+            hint={
+              run.gpu_memory_mb
+                ? `~${(run.gpu_memory_mb / 1024).toFixed(1)} GB ${workers.length > 1 ? "per worker" : "reserved"}`
+                : undefined
+            }
+          />
+          <StatTile label="Max tokens" value={run.config.max_tokens.toLocaleString()} />
+        </div>
 
         {workers.length > 1 && (
-          <div className="mt-6 overflow-hidden rounded-xl border border-hairline">
-            {workers.map((w, k) => (
-              <WorkerRow key={k} index={k} worker={w} repeat={run.config.repeat} active={active} />
-            ))}
-          </div>
+          <Card
+            className="col-span-12"
+            title="Workers"
+            description="Each worker runs its own copy of the model, with its own network and capture, on its share of the prompts."
+          >
+            {/* Two columns on wide screens: with workers dealt out over 2 GPUs in turn, each column is one GPU */}
+            <div className="grid gap-3 2xl:grid-cols-2">
+              {workers.map((w, k) => (
+                <WorkerRow key={k} index={k} worker={w} repeat={run.config.repeat} active={active} />
+              ))}
+            </div>
+          </Card>
         )}
-      </Card>
-
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatTile label="Elapsed" value={formatDuration(end - started)} />
-        <StatTile label="PCAPs" value={run.outputs.pcaps.toLocaleString()} hint={formatBytes(run.outputs.pcap_bytes)} />
-        <StatTile
-          label="Hardware"
-          value={hardwareLabel(run)}
-          hint={run.gpu_memory_mb ? `~${(run.gpu_memory_mb / 1024).toFixed(1)} GB reserved` : undefined}
-        />
-        <StatTile label="Max tokens" value={run.config.max_tokens.toLocaleString()} />
       </div>
 
       {run.cleanup && (
@@ -152,7 +180,9 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
           <dl className="grid gap-4 text-sm sm:grid-cols-3">
             <div>
               <dt className="text-xs text-ink-3">Containers</dt>
-              <dd className="mt-0.5">{run.cleanup.containers.length > 0 ? run.cleanup.containers.join(", ") : "None left to remove"}</dd>
+              <dd className="mt-0.5">
+                {run.cleanup.containers.length > 0 ? run.cleanup.containers.join(", ") : "None left to remove"}
+              </dd>
             </div>
             <div>
               <dt className="text-xs text-ink-3">Networks</dt>
@@ -162,7 +192,9 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
             </div>
             <div>
               <dt className="text-xs text-ink-3">Images</dt>
-              <dd className="mt-0.5 break-all">{run.cleanup.images.length > 0 ? run.cleanup.images.join(", ") : "None"}</dd>
+              <dd className="mt-0.5 break-all">
+                {run.cleanup.images.length > 0 ? run.cleanup.images.join(", ") : "None"}
+              </dd>
             </div>
           </dl>
           {run.cleanup.errors.length > 0 && (
@@ -198,7 +230,9 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
             lines.map((line, i) => (
               <div key={i} className="whitespace-pre-wrap break-words">
                 <span className="text-zinc-500">{line.slice(0, 8)}</span>
-                <span className={/ERROR|⚠/.test(line) ? "text-[#e66767]" : /✓/.test(line) ? "text-zinc-100" : ""}>{line.slice(8)}</span>
+                <span className={/ERROR|⚠/.test(line) ? "text-[#e66767]" : /✓/.test(line) ? "text-zinc-100" : ""}>
+                  {line.slice(8)}
+                </span>
               </div>
             ))
           )}
@@ -233,7 +267,7 @@ function WorkerRow({
   const total = worker.total;
   const finished = total != null && done >= total;
   return (
-    <div className="flex items-center gap-3 border-b border-hairline px-4 py-2.5 text-sm last:border-b-0">
+    <div className="flex items-center gap-3 rounded-xl border border-hairline px-4 py-2.5 text-sm">
       <span className="w-20 shrink-0 text-xs font-medium text-ink-3">
         Worker {index + 1}
         <span className="block font-normal">{worker.gpus.length ? `GPU ${worker.gpus.join(", ")}` : "CPU"}</span>
@@ -242,7 +276,7 @@ function WorkerRow({
         {worker.current ? (
           <>
             <Spinner className="h-3.5 w-3.5 shrink-0 text-accent" />
-            <div className="min-w-0 truncate">
+            <div className="min-w-0 truncate" title={worker.step ?? undefined}>
               <PromptLabel current={worker.current} repeat={repeat} />
               <span className="text-ink-2">{worker.step ?? "Starting…"}</span>
             </div>

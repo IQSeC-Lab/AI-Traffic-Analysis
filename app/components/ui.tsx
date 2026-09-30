@@ -137,10 +137,10 @@ export function StatTile({
   className?: string;
 }) {
   return (
-    <div className={`rounded-2xl border border-hairline bg-surface p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)] ${className}`}>
+    <div className={`min-w-0 rounded-2xl border border-hairline bg-surface p-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)] ${className}`}>
       <div className="text-xs font-medium text-ink-3">{label}</div>
-      <div className="mt-2 text-2xl font-semibold tracking-tight">{value}</div>
-      {hint && <div className="mt-1 text-xs text-ink-3">{hint}</div>}
+      <div className="mt-2 truncate text-2xl font-semibold tracking-tight">{value}</div>
+      {hint && <div className="mt-1 truncate text-xs text-ink-3">{hint}</div>}
     </div>
   );
 }
