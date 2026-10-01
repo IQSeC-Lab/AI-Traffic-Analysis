@@ -20,12 +20,13 @@ import math
 import struct
 import threading
 from collections import Counter
+from functools import lru_cache
 from pathlib import Path
 from statistics import median
 
 from prompt_library import store as prompt_library
 
-from .base import Variant
+from .base import PROMPTS_FILE, Variant
 
 SERVER_PORT = 8000
 CACHE_VERSION = 3
@@ -113,16 +114,38 @@ def _prompt_and_iteration(index: int) -> tuple[int, int | None]:
     return (index // 1000, index % 1000) if index >= 1000 else (index, None)
 
 
-def _identity(index: int, result: dict) -> tuple[int, int | None, str]:
+@lru_cache(maxsize=64)
+def _load_run_prompts(path: str, mtime_ns: int) -> dict[int, dict]:
+    return {int(n): p for n, p in json.loads(Path(path).read_text()).items()}
+
+
+def run_prompts(run_dir: Path) -> dict[int, dict] | None:
+    """The prompts the run was created with ({number: {"text", "category"}}), or None for
+    runs saved before they were kept. Those took their prompts from the prompt library."""
+    path = run_dir / PROMPTS_FILE
+    try:
+        return _load_run_prompts(str(path), path.stat().st_mtime_ns)
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def _known_prompt(run_dir: Path, number: int) -> dict | None:
+    """A prompt of the run, from its own prompts. Only runs without them fall back to the
+    library: in a Custom Prompts run, prompt 1 is not the library's prompt 1."""
+    prompts = run_prompts(run_dir)
+    return prompts.get(number) if prompts is not None else prompt_library.get(number)
+
+
+def _identity(run_dir: Path, index: int, result: dict) -> tuple[int, int | None, str]:
     """Prompt number, iteration and category of a capture. Runs save them with the client's
-    result; for older captures they come from the file index and the prompt library."""
+    result; otherwise they come from the file index and the run's prompts."""
     if "prompt" in result:
         prompt, iteration = result["prompt"], result.get("iteration")
     else:
         prompt, iteration = _prompt_and_iteration(index)
     category = result.get("category")
     if not category:
-        known = prompt_library.get(prompt)
+        known = _known_prompt(run_dir, prompt)
         category = known["category"] if known else None
     return prompt, iteration, category or UNCATEGORIZED
 
@@ -159,7 +182,7 @@ def build_record(pcap: Path, result_file: Path, index: int) -> dict:
     gaps = [(b[0] - a[0]) * 1000 for a, b in zip(stream, stream[1:])]
 
     result = json.loads(result_file.read_text()) if result_file.exists() else {}
-    prompt, iteration, category = _identity(index, result)
+    prompt, iteration, category = _identity(pcap.parent.parent, index, result)
     record = {
         "version": CACHE_VERSION,
         "index": index,
@@ -217,7 +240,7 @@ def capture_record(run_dir: Path, stem: str, index: int) -> dict:
     try:
         record = build_record(pcap, result_file, index)
     except (OSError, ValueError, struct.error) as e:
-        prompt, iteration, category = _identity(index, {})
+        prompt, iteration, category = _identity(run_dir, index, {})
         record = {"version": CACHE_VERSION, "index": index, "prompt": prompt, "iteration": iteration,
                   "category": category, "worker": None, "gpus": None, "error": str(e), "metrics": {}, "size_counts": {},
                   "gap_hist": [0] * (len(GAP_EDGES_MS) - 1)}
@@ -430,7 +453,7 @@ def capture_detail(run_dir: Path, stem: str, index: int, variant: Variant, max_p
     events = [[round(e["t"], 6), round(e["dt"] * 1000, 3), e["text"]] for e in timing[::tstep]]
 
     prompt_file = run_dir / "logs" / f"prompt_{index:02d}.txt"
-    known = prompt_library.get(record["prompt"])
+    known = _known_prompt(run_dir, record["prompt"])
     prompt_text = prompt_file.read_text() if prompt_file.exists() else (known["text"] if known else "")
     return {
         "key": stem,

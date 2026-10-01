@@ -14,12 +14,15 @@ import {
   type PromptLibrary,
   type Run,
   type RunConfig,
+  type Settings,
   type SystemInfo,
 } from "@/lib/api";
 import { EXPERIMENTS, runHref } from "@/lib/experiments";
 import { formatBytes } from "@/lib/format";
 import { Alert, ButtonLink, Field, Loading, Segmented, Spinner, buttonClass, inputClass } from "@/components/ui";
 import { PromptDialog } from "@/components/prompts/PromptDialog";
+import { CustomPromptsEditor } from "./CustomPromptsEditor";
+import { Section } from "./FormSection";
 import { variantColor } from "./RunBadge";
 
 // What the experiment API accepts as `model`: the repo id when known, else the folder name.
@@ -47,31 +50,6 @@ function conditionProblem(conditions: NetworkCondition[], i: number): string | n
   if (c.jitter_ms && !c.delay_ms) return "Jitter needs a delay.";
   const same = conditions.findIndex((o) => conditionLabel(o) === conditionLabel(c));
   return same < i ? `Same as condition ${same + 1}.` : null;
-}
-
-function Section({
-  title,
-  description,
-  action,
-  children,
-}: {
-  title: string;
-  description?: string;
-  action?: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <section className="rounded-2xl border border-hairline bg-surface p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold">{title}</h2>
-          {description && <p className="text-xs text-ink-3">{description}</p>}
-        </div>
-        {action && <div className="shrink-0">{action}</div>}
-      </div>
-      {children}
-    </section>
-  );
 }
 
 function SelectCard({
@@ -113,6 +91,8 @@ export function RunForm({ experiment }: { experiment: string }) {
   const router = useRouter();
   const info = EXPERIMENTS.find((e) => e.slug === experiment);
   const multiModel = experiment === "scalability";
+  const ownPrompts = info?.ownPrompts ?? false; // Custom Prompts: written here, not chosen from the library
+  const sweepsTemperature = experiment === "temperature-change";
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [models, setModels] = useState<LocalModel[] | null>(null);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
@@ -136,15 +116,19 @@ export function RunForm({ experiment }: { experiment: string }) {
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [customPrompts, setCustomPrompts] = useState<string[] | null>(null); // null while they load
+  const [defaultTemperature, setDefaultTemperature] = useState<number | null>(null);
 
   useEffect(() => {
     Promise.all([
       api<SystemInfo>("/system"),
       api<ModelsResponse>("/settings/models"),
-      api<PromptLibrary>("/prompts"),
+      // Custom Prompts never reads the prompt library
+      ownPrompts ? Promise.resolve<PromptLibrary>({ prompts: [], categories: [] }) : api<PromptLibrary>("/prompts"),
       api<Run[]>("/experiments/active"),
+      api<Settings>("/settings"),
     ])
-      .then(([sys, downloaded, library, active]) => {
+      .then(([sys, downloaded, library, active, settings]) => {
         const ready = downloaded.models.filter((m) => m.complete && !m.downloading);
         // Scalability goes from the smallest model to the largest, so its charts read that way too
         if (multiModel) ready.sort((a, b) => a.size_bytes - b.size_bytes);
@@ -161,9 +145,10 @@ export function RunForm({ experiment }: { experiment: string }) {
         const preset = library.prompts.filter((p) => p.category === category);
         setSelected(new Set((preset.length ? preset : library.prompts).map((p) => p.number)));
         setActiveRuns(active);
+        setDefaultTemperature(settings.default_temperature);
       })
       .catch((e: Error) => setError(e.message));
-  }, [multiModel, info]);
+  }, [multiModel, ownPrompts, info]);
 
   const categories = useMemo(() => {
     const groups = new Map<string, Prompt[]>();
@@ -228,13 +213,18 @@ export function RunForm({ experiment }: { experiment: string }) {
     variantCount <= MAX_VARIANTS &&
     (experiment !== "delay" || conditions.every((_, i) => !conditionProblem(conditions, i)));
 
+  const promptCount = ownPrompts ? (customPrompts?.length ?? 0) : selected.size;
+  const promptsOk = ownPrompts
+    ? customPrompts != null && customPrompts.length > 0 && customPrompts.every((p) => p.trim())
+    : selected.size > 0;
+
   const onGpu = gpuMode !== "cpu" && (system?.gpus.length ?? 0) > 0;
   const splitting = onGpu && gpuMode === "manual" && split && gpus.length > 1;
   const perGpuMode = onGpu && gpuMode === "manual" && !splitting;
   // The API also caps workers at the number of captures: a worker without prompts would only hold memory
   const workerCount = Math.max(
     1,
-    Math.min(perGpuMode ? Math.max(1, gpus.length) * perGpu : workers, selected.size * Math.max(1, repeat) * Math.max(1, variantCount)),
+    Math.min(perGpuMode ? Math.max(1, gpus.length) * perGpu : workers, promptCount * Math.max(1, repeat) * Math.max(1, variantCount)),
   );
 
   async function start() {
@@ -248,7 +238,9 @@ export function RunForm({ experiment }: { experiment: string }) {
       split_model: splitting,
       workers: workerCount,
       name: name.trim() || null,
-      prompts: selected.size === prompts.length ? null : [...selected].sort((a, b) => a - b),
+      ...(ownPrompts
+        ? { prompt_texts: customPrompts ?? [], prompts: null }
+        : { prompts: selected.size === prompts.length ? null : [...selected].sort((a, b) => a - b) }),
       repeat: repeat > 1 ? repeat : null,
       max_tokens: maxTokens,
     };
@@ -265,7 +257,7 @@ export function RunForm({ experiment }: { experiment: string }) {
     return error ? <Alert>{error}</Alert> : <Loading label="Detecting GPUs and models…" />;
   }
 
-  const total = selected.size * Math.max(1, repeat) * variantCount;
+  const total = promptCount * Math.max(1, repeat) * variantCount;
   // Workers load one model at a time, so a run of several reserves room for the largest
   const chosen = models.filter((m) => (multiModel ? modelsChosen.includes(modelRef(m)) : modelRef(m) === model));
   const needMb = chosen.some((m) => m.gpu_memory_mb != null) ? Math.max(...chosen.map((m) => m.gpu_memory_mb ?? 0)) : null;
@@ -303,7 +295,7 @@ export function RunForm({ experiment }: { experiment: string }) {
     system.docker.available &&
     (multiModel ? modelsChosen.length > 0 : model) &&
     variantsOk &&
-    selected.size > 0 &&
+    promptsOk &&
     !starting &&
     !(onGpu && gpuMode === "manual" && gpus.length === 0);
   const selectedCategories = categories.filter(([, items]) => items.some((p) => selected.has(p.number))).length;
@@ -678,60 +670,64 @@ export function RunForm({ experiment }: { experiment: string }) {
           )}
         </Section>
 
-        <Section
-          title="Prompts"
-          description="Click a category to toggle it. Hover a number to preview the prompt."
-          action={
-            <div className="flex gap-1">
-              <button type="button" onClick={() => setAdding(true)} className={buttonClass("secondary", "sm")}>
-                New prompt
-              </button>
-              <button type="button" onClick={() => setSelected(new Set(prompts.map((p) => p.number)))} className={buttonClass("ghost", "sm")}>
-                All
-              </button>
-              <button type="button" onClick={() => setSelected(new Set())} className={buttonClass("ghost", "sm")}>
-                None
-              </button>
-            </div>
-          }
-        >
-          <div className="space-y-2.5">
-            {categories.map(([name, items]) => {
-              const count = items.filter((p) => selected.has(p.number)).length;
-              return (
-                <div key={name} className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                  <button
-                    type="button"
-                    onClick={() => togglePrompts(items.map((p) => p.number))}
-                    className="flex w-60 shrink-0 items-center justify-between gap-2 rounded-lg px-2 py-1 text-left text-xs font-medium text-ink-2 hover:bg-surface-2"
-                  >
-                    <span className="truncate">{name}</span>
-                    <span className="text-ink-3 tabular-nums">
-                      {count}/{items.length}
-                    </span>
-                  </button>
-                  <div className="flex flex-wrap gap-1">
-                    {items.map((p) => (
-                      <button
-                        key={p.number}
-                        type="button"
-                        title={p.text.slice(0, 300)}
-                        onClick={() => togglePrompts([p.number])}
-                        className={`h-7 w-8 rounded-md text-xs font-medium tabular-nums transition-colors ${
-                          selected.has(p.number)
-                            ? "bg-accent-strong text-white shadow-sm"
-                            : "bg-surface-2 text-ink-3 hover:text-ink"
-                        }`}
-                      >
-                        {p.number}
-                      </button>
-                    ))}
+        {ownPrompts ? (
+          <CustomPromptsEditor onChange={setCustomPrompts} />
+        ) : (
+          <Section
+            title="Prompts"
+            description="Click a category to toggle it. Hover a number to preview the prompt."
+            action={
+              <div className="flex gap-1">
+                <button type="button" onClick={() => setAdding(true)} className={buttonClass("secondary", "sm")}>
+                  New prompt
+                </button>
+                <button type="button" onClick={() => setSelected(new Set(prompts.map((p) => p.number)))} className={buttonClass("ghost", "sm")}>
+                  All
+                </button>
+                <button type="button" onClick={() => setSelected(new Set())} className={buttonClass("ghost", "sm")}>
+                  None
+                </button>
+              </div>
+            }
+          >
+            <div className="space-y-2.5">
+              {categories.map(([name, items]) => {
+                const count = items.filter((p) => selected.has(p.number)).length;
+                return (
+                  <div key={name} className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <button
+                      type="button"
+                      onClick={() => togglePrompts(items.map((p) => p.number))}
+                      className="flex w-60 shrink-0 items-center justify-between gap-2 rounded-lg px-2 py-1 text-left text-xs font-medium text-ink-2 hover:bg-surface-2"
+                    >
+                      <span className="truncate">{name}</span>
+                      <span className="text-ink-3 tabular-nums">
+                        {count}/{items.length}
+                      </span>
+                    </button>
+                    <div className="flex flex-wrap gap-1">
+                      {items.map((p) => (
+                        <button
+                          key={p.number}
+                          type="button"
+                          title={p.text.slice(0, 300)}
+                          onClick={() => togglePrompts([p.number])}
+                          className={`h-7 w-8 rounded-md text-xs font-medium tabular-nums transition-colors ${
+                            selected.has(p.number)
+                              ? "bg-accent-strong text-white shadow-sm"
+                              : "bg-surface-2 text-ink-3 hover:text-ink"
+                          }`}
+                        >
+                          {p.number}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        </Section>
+                );
+              })}
+            </div>
+          </Section>
+        )}
 
         <Section title="Generation">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -754,6 +750,16 @@ export function RunForm({ experiment }: { experiment: string }) {
               />
             </Field>
           </div>
+          {!sweepsTemperature && defaultTemperature != null && (
+            <p className="mt-4 text-xs text-ink-3">
+              The model samples at temperature <span className="font-medium text-ink-2">{defaultTemperature}</span>
+              {defaultTemperature === 0 && " (greedy decoding)"}, the default set in{" "}
+              <Link href="/settings" className="font-medium text-ink-2 underline">
+                Settings
+              </Link>
+              .
+            </p>
+          )}
         </Section>
       </div>
 
@@ -767,7 +773,7 @@ export function RunForm({ experiment }: { experiment: string }) {
             </div>
             {info?.variable && (
               <div className="mt-1 text-xs text-ink-3 tabular-nums">
-                {selected.size} prompt{selected.size === 1 ? "" : "s"}
+                {promptCount} prompt{promptCount === 1 ? "" : "s"}
                 {repeat > 1 && ` × ${repeat}`} × {variantCount} {variantCount === 1 ? info.variable.one : info.variable.many}
               </div>
             )}
@@ -783,8 +789,14 @@ export function RunForm({ experiment }: { experiment: string }) {
               ["Hardware", hardware],
               ["Workers", workerCount > 1 ? `${workerCount} · ${shareText} captures each` : "1"],
               ...(onGpu && needMb != null ? [["GPU memory", `~${gb(needMb * workerCount)}`]] : []),
-              ["Prompts", `${selected.size} from ${selectedCategories} categor${selectedCategories === 1 ? "y" : "ies"}`],
+              [
+                "Prompts",
+                ownPrompts
+                  ? `${promptCount} written here`
+                  : `${selected.size} from ${selectedCategories} categor${selectedCategories === 1 ? "y" : "ies"}`,
+              ],
               ["Repeat", repeat > 1 ? `× ${repeat}` : "Once"],
+              ...(!sweepsTemperature && defaultTemperature != null ? [["Temperature", `${defaultTemperature}`]] : []),
               ["Max tokens", maxTokens.toLocaleString()],
             ].map(([k, v]) => (
               <div key={k} className="flex justify-between gap-3 py-2.5">
@@ -803,7 +815,7 @@ export function RunForm({ experiment }: { experiment: string }) {
                   multiModel
                     ? "e.g. 7B models"
                     : model
-                      ? `${shortName(model)} ${experiment === "temperature-change" ? "temperature sweep" : experiment === "delay" ? "under delay" : "baseline"}`
+                      ? `${shortName(model)} ${sweepsTemperature ? "temperature sweep" : experiment === "delay" ? "under delay" : ownPrompts ? "crafted prompts" : "baseline"}`
                       : "e.g. Qwen baseline"
                 }
                 className={inputClass}

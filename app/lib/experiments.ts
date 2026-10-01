@@ -1,4 +1,4 @@
-import { Layers, Radar, Syringe, Thermometer, Timer, type LucideIcon } from "lucide-react";
+import { Layers, PenLine, Radar, Thermometer, Timer, type LucideIcon } from "lucide-react";
 
 export type ExperimentInfo = {
   slug: string;
@@ -11,9 +11,11 @@ export type ExperimentInfo = {
   variable?: { one: string; many: string };
   /** New run form defaults, as in the original experiment's scripts. */
   defaults?: { category?: string; repeat?: number };
+  /** Its prompts are written in the experiment itself instead of chosen from the prompt library. */
+  ownPrompts?: boolean;
 };
 
-// The experiments from the repo (2-6), added to the app one at a time.
+// The experiments from the repo (2-6).
 export const EXPERIMENTS: ExperimentInfo[] = [
   {
     slug: "data-collector",
@@ -35,12 +37,16 @@ export const EXPERIMENTS: ExperimentInfo[] = [
     variable: { one: "temperature", many: "temperatures" },
   },
   {
-    slug: "crafted-prompts",
-    name: "Crafted Prompts",
-    summary: "Prompt-injection traffic",
-    description: "Traffic from adversarially crafted prompts, following the LLMmap methodology.",
-    icon: Syringe,
-    available: false,
+    slug: "custom-prompts",
+    name: "Custom Prompts",
+    summary: "Prompts written for the run",
+    description:
+      "Traffic from prompts you write here, kept apart from the prompt library. It starts with the 10 adversarially crafted prompts that follow the LLMmap methodology.",
+    icon: PenLine,
+    available: true,
+    // 4-Crafted-Prompts: its 10 prompts, 10 times each (r1.py)
+    defaults: { repeat: 10 },
+    ownPrompts: true,
   },
   {
     slug: "scalability",

@@ -1,7 +1,8 @@
 """
 HTTP endpoints of the capture experiments: the same set under /api/<slug> for each
 experiment (/api/data-collector, /api/temperature-change, ...), plus
-/api/experiments for the runs of all of them.
+/api/experiments for the runs of all of them. Custom Prompts adds its saved
+prompts (custom_prompts.router).
 """
 
 # No `from __future__ import annotations` here: make_router's endpoints annotate their
@@ -11,7 +12,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from . import analysis, engine, export
+from . import analysis, custom_prompts, engine, export
 from .base import NAME_MAX, Kind
 from .kinds import KINDS
 
@@ -188,4 +189,4 @@ def all_active_runs() -> list[dict]:
     return [run.summary() for run in engine.active_runs()]
 
 
-routers = [all_router, *(make_router(kind) for kind in KINDS.values())]
+routers = [all_router, *(make_router(kind) for kind in KINDS.values()), custom_prompts.router]

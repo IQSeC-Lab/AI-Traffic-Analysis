@@ -20,6 +20,9 @@ from storage import MODEL_REF_PATTERN
 
 NAME_MAX = 60
 MAX_VARIANTS = 8   # each variant gets its own color in the charts (--series-1 to --series-8)
+# The prompts a run was created with, saved in its folder as {number: {"text", "category"}}.
+# Results are read against these, so editing or deleting a prompt later never changes a past run.
+PROMPTS_FILE = "prompts.json"
 
 ModelRef = Annotated[
     str,
@@ -65,7 +68,7 @@ class Variant:
     key: str                              # unique in the run, and safe in file names
     label: str                            # how the logs and the UI name it
     model: str
-    temperature: float | None = None      # None: the inference server's default (0.7)
+    temperature: float | None = None      # None until a run is created: then the default from Settings
     network: dict | None = None           # tc netem on the server's egress: delay_ms, jitter_ms, distribution
     columns: dict = field(default_factory=dict)   # its settings, as columns of the metrics CSV
 
@@ -87,6 +90,9 @@ class Kind:
     config: type[RunConfig]
     variants: Callable[[RunConfig], list[Variant]]   # raises ValueError for settings that can't run
     variable: str | None = None                   # what the variants vary ("Temperature"); None with one variant
+    # The run's prompts as {number: {"text", "category"}}, raising ValueError when they can't run.
+    # None: prompt numbers from the prompt library (config.prompts, all of them when omitted).
+    prompts: Callable[[RunConfig], dict[int, dict]] | None = None
 
     @property
     def run_label(self) -> str:

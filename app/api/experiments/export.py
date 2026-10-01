@@ -10,7 +10,7 @@ from typing import Iterator
 
 from .base import Variant
 
-RUN_FILES = ("run.json", "run.log")
+RUN_FILES = ("run.json", "run.log", "prompts.json")
 RUN_FOLDERS = ("captures", "results", "logs")   # the analysis/ cache is left out; it is rebuilt from these
 
 METRIC_COLUMNS = [

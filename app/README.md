@@ -7,11 +7,13 @@ app/                              # project root
 ├── api/                          # FastAPI backend, all routes under /api
 │   ├── index.py                  # app, routers, startup/shutdown hooks
 │   ├── storage.py                # where models, outputs and settings live
+│   ├── console.py                # server console output that survives a dropped terminal
 │   ├── system.py                 # GPU (nvidia-smi) and Docker detection
 │   ├── settings/                 # HF token + model downloader
 │   ├── prompt_library/           # built-in prompts + your own (/api/prompts)
 │   └── experiments/              # the capture experiments, one engine for all of them
 │       ├── data_collector.py     # 2, ported from ../2-Data-Collector
+│       ├── custom_prompts.py     # 4, ported from ../4-Crafted-Prompts, with its own prompts
 │       ├── temperature_change.py # 3, ported from ../3-Temperature-change
 │       ├── scalability.py        # 5, ported from ../5-Scalability
 │       ├── delay.py              # 6, ported from ../6-Delay
@@ -48,11 +50,11 @@ npm run dev         # Next.js on :3000 + FastAPI on :8000
 
 Open http://localhost:3000. API docs: http://localhost:3000/api/docs.
 
-`dev:api` restarts FastAPI whenever a file in `api/` changes, which cancels a running experiment. For long experiments run the API without reload in its own terminal: `npm run start:api` together with `npm run dev:next`.
+`dev:api` restarts FastAPI whenever a file in `api/` changes, which cancels a running experiment. For long experiments run the API without reload in its own terminal: `npm run start:api` together with `npm run dev:next`. On a remote server, start the app inside `tmux` so it keeps running when the SSH connection drops.
 
 ## Using it
 
-The sidebar lists the experiments. Data Collector, Temperature Change, Scalability and Delay are available; Crafted Prompts is not yet.
+The sidebar lists the five experiments: Data Collector, Temperature Change, Custom Prompts, Scalability and Delay.
 
 | Page | What it's for |
 | --- | --- |
@@ -60,21 +62,24 @@ The sidebar lists the experiments. Data Collector, Temperature Change, Scalabili
 | **_Experiment_ › Runs** | Every run of that experiment, newest first |
 | **_Experiment_ › New run** | Pick a downloaded model (several on Scalability), what the experiment compares (see below), the hardware (Auto, chosen GPUs, or CPU), the number of workers, prompts, repeats and max tokens |
 | **Run page** | *Monitor*: queue position, live progress, what each worker is doing, log, Cancel. *Results*: the run's analytics, and every capture with its packets on the wire, prompt, response and a PCAP download. *Export files* downloads the whole run as a zip, *Metrics CSV* one row per capture (with the worker and GPU that made it). Finished runs can be deleted here or from the runs list |
-| **Prompts** | The prompt library: the 60 built-in prompts plus your own, in your own categories. Add prompts here or from *New run* |
-| **Settings** | Theme (light / dark / system) and accent color, the results folder, HuggingFace token, model downloads and deletion |
+| **Prompts** | The prompt library: the 60 built-in prompts plus your own, in your own categories. Add prompts here or from *New run*. Custom Prompts doesn't use it |
+| **Settings** | Theme (light / dark / system) and accent color, the default sampling temperature, the results folder, HuggingFace token, model downloads and deletion |
 
 Every run gets a number (#1, #2, …) shown as a colored badge. Numbers are shared by all experiments and never reused, so #7 always means the same run. A run can also have a name, set when starting it or later from its page.
 
 ### The experiments
 
-All four run the same capture: a fresh inference container per prompt, a tcpdump sidecar, and a client on an isolated network. The Data Collector captures every prompt once. The other three compare several settings in one run (up to 8, one chart color each) and capture every prompt once per setting.
+All five run the same capture: a fresh inference container per prompt, a tcpdump sidecar, and a client on an isolated network. Data Collector and Custom Prompts capture every prompt once. The other three compare several settings in one run (up to 8, one chart color each) and capture every prompt once per setting.
 
 | Experiment | A run compares | Defaults (from the original scripts) |
 | --- | --- | --- |
 | **Data Collector** | nothing: the baseline | all prompts, once |
+| **Custom Prompts** | nothing. Its prompts are written in its *New run* form and saved with the experiment (`data/custom-prompts.json`), never in the prompt library. They are sent exactly as written, spaces and line breaks included. Results are broken down per prompt | the 10 crafted prompts of `4-Crafted-Prompts/main.py`, verbatim, 10 times each |
 | **Temperature Change** | sampling temperatures, 0 to 2, on one model. The original edited `TEMPERATURE` in `inference_server.py` between runs; here the server gets `--temperature`. 0 is greedy decoding | all prompts, once, at 0.3, 0.7 and 0.9 |
 | **Scalability** | models, smallest first. The original ran one model per invocation. GPU memory is reserved for the largest | the 10 Code Generation prompts, 10 times each |
 | **Delay** | network conditions: a delay, a jitter and its distribution (`normal`, `pareto`, `paretonormal`). Before each capture, `tc qdisc add dev eth0 root netem delay …` runs from a netshoot sidecar in the inference container's network, as in `6-Delay/main.py`. It delays everything the server sends, so both the PCAP and the client's timing show it | the 10 Logical Reasoning prompts, 10 times each, with no delay and with 500 ms ± 50 ms |
+
+**Sampling temperature.** Data Collector, Custom Prompts, Scalability and Delay sample at the default temperature in Settings → Sampling (0.7 unless changed, as in the original scripts; 0 is greedy decoding). A run records the temperature it started with, so changing the setting only affects new runs. Temperature Change sets its own temperatures and ignores it. In every case only the temperature is set: the model's own `generation_config.json` (top_p, top_k, repetition penalty) still applies, as in the original scripts.
 
 The captures of a prompt's settings run one after the other (prompt 1 at every temperature, then prompt 2, …), so every setting sees the same conditions over the run and a cancelled run still has all of them. On the results page, the **By temperature / model / network condition** tile compares them metric by metric, and every chart has one series per setting.
 
@@ -119,7 +124,7 @@ Nothing without that label is touched. If the API process dies mid-run, the next
 
 ## Outputs
 
-`<experiment>` is `data-collector`, `temperature-change`, `scalability` or `delay`.
+`<experiment>` is `data-collector`, `temperature-change`, `custom-prompts`, `scalability` or `delay`.
 
 | Path                                   | Contents                                               |
 | -------------------------------------- | ------------------------------------------------------ |
@@ -127,10 +132,12 @@ Nothing without that label is touched. If the API process dies mid-run, the next
 | `data/<experiment>/<run id>/results`  | client output per capture: response + per-event timing, its setting, and the worker and GPUs that ran it |
 | `data/<experiment>/<run id>/logs`     | prompt text, model response and server logs            |
 | `data/<experiment>/<run id>/analysis` | cached analytics per capture                           |
-| `data/<experiment>/<run id>/run.json` | the run's settings, what it compares, status and cleanup report |
+| `data/<experiment>/<run id>/run.json` | the run's settings, what it compares, its temperature, status and cleanup report |
+| `data/<experiment>/<run id>/prompts.json` | the prompts the run was created with (text and category). Results are read against these, so editing a prompt later never changes a past run |
 | `data/<experiment>/<run id>/run.log`  | the run's full log                                     |
 | `data/prompts.json`                    | your prompts (numbered from 61; numbers are never reused) |
-| `data/settings.json`                   | saved settings, including the HF token (owner-only)    |
+| `data/custom-prompts.json`             | the Custom Prompts experiment's saved prompts (the crafted ones until you change them) |
+| `data/settings.json`                   | saved settings: results folder, default temperature, HF token (owner-only) |
 | `models/<org>-<name>`                  | downloaded models                                      |
 
 ## Configuration

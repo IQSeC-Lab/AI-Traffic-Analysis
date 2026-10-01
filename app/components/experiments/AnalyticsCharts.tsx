@@ -123,7 +123,8 @@ export function SizeChart({ data, series, height = 240, className }: TileProps) 
   );
 }
 
-export function CategoryChart({ data, series, height = 240, className }: TileProps) {
+/** Medians per prompt category. With `byPrompt`, the categories are the run's own prompts ("Prompt 1", ...). */
+export function CategoryChart({ data, series, height = 240, className, byPrompt = false }: TileProps & { byPrompt?: boolean }) {
   const [metric, setMetric] = useState<MetricKey>("median_ttft_ms");
   const groups = seriesGroups(data, series);
   const categories = [...new Set(groups.flatMap(({ group }) => group.by_category.map((c) => c.category)))];
@@ -134,8 +135,8 @@ export function CategoryChart({ data, series, height = 240, className }: TilePro
   }));
   return (
     <ChartCard
-      title="By prompt category"
-      subtitle={`Median ${m.label.toLowerCase()} per category`}
+      title={byPrompt ? "By prompt" : "By prompt category"}
+      subtitle={`Median ${m.label.toLowerCase()} per ${byPrompt ? "prompt" : "category"}`}
       legend={categorySeries}
       legendShape="rect"
       height={height}
@@ -155,18 +156,18 @@ export function CategoryChart({ data, series, height = 240, className }: TilePro
         </select>
       }
       table={{
-        columns: ["Category", ...categorySeries.map((s) => s.label)],
+        columns: [byPrompt ? "Prompt" : "Category", ...categorySeries.map((s) => s.label)],
         rows: categories.map((c, i) => [c, ...categorySeries.map((s) => (s.values[i] == null ? "—" : m.format(s.values[i]!)))]),
       }}
     >
       {categories.length > 0 && categorySeries.some((s) => s.values.some((v) => v != null)) ? (
         <GroupedColumns
           categories={categories}
-          shortLabels={categories.map((c) => CATEGORY_SHORT[c] ?? c)}
+          shortLabels={categories.map((c) => (byPrompt ? c.replace(/^Prompt /, "#") : (CATEGORY_SHORT[c] ?? c)))}
           series={categorySeries}
           height={height}
           format={m.format}
-          ariaLabel={`Median ${m.label} by prompt category`}
+          ariaLabel={`Median ${m.label} by ${byPrompt ? "prompt" : "prompt category"}`}
         />
       ) : (
         <NoData height={height} text="No client timing for this metric. Runs record it from now on." />

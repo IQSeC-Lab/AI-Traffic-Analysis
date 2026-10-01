@@ -55,6 +55,8 @@ export type Settings = {
   results_dir: string; // where new runs are saved
   results_default: string;
   results_dirs: string[]; // every folder runs were saved in (all still listed)
+  default_temperature: number; // sampling temperature of new runs, except Temperature Change's
+  original_temperature: number; // what the original scripts sample at (0.7)
 };
 
 export type Prompt = {
@@ -66,6 +68,14 @@ export type Prompt = {
 };
 
 export type PromptCategory = { name: string; count: number; builtin: boolean };
+
+/** The Custom Prompts experiment's own prompts, kept apart from the prompt library. */
+export type CustomPrompts = {
+  prompts: string[]; // the saved set (the crafted prompts until something is saved)
+  crafted: string[]; // the 10 prompts of 4-Crafted-Prompts
+  max_prompts: number;
+  max_chars: number;
+};
 
 export type PromptLibrary = { prompts: Prompt[]; categories: PromptCategory[] };
 
@@ -80,7 +90,8 @@ export type RunConfig = {
   models?: string[]; // Scalability: the models compared
   temperatures?: number[]; // Temperature Change: 0 is greedy decoding
   conditions?: NetworkCondition[]; // Delay
-  prompts: number[] | null;
+  prompt_texts?: string[]; // Custom Prompts: the prompts themselves (only sent when starting a run)
+  prompts: number[] | null; // prompt library numbers, null = all. Not used by Custom Prompts
   repeat: number | null;
   gpus: number[] | "auto"; // "auto" = spread over the GPUs with room; [] = CPU
   split_model?: boolean; // chosen GPUs: split every worker's model across all of them, instead of one GPU each
@@ -106,7 +117,7 @@ export type Variant = {
   key: string; // its captures are <key>-pNN
   label: string;
   model: string;
-  temperature: number | null;
+  temperature: number | null; // what it sampled at. null on runs from before it was recorded: 0.7
   network: NetworkCondition | null; // null: no delay added
   columns: Record<string, string | number | null>;
   done?: number; // captures finished, of `total`

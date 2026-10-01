@@ -33,7 +33,8 @@ export function CaptureDrawer({ run, captureKey, onClose }: { run: Run; captureK
 
   const m = detail?.metrics;
   // Which temperature, model or network condition it was captured with
-  const variant = EXPERIMENTS.find((e) => e.slug === run.experiment)?.variable
+  const info = EXPERIMENTS.find((e) => e.slug === run.experiment);
+  const variant = info?.variable
     ? run.variants.find((v) => v.key === detail?.variant)
     : undefined;
   return (
@@ -43,7 +44,7 @@ export function CaptureDrawer({ run, captureKey, onClose }: { run: Run; captureK
         <div className="flex items-start justify-between gap-4 border-b border-hairline bg-surface px-6 py-4">
           <div>
             <div className="text-xs font-medium text-ink-3">
-              {detail?.category ?? "Capture"}
+              {info?.ownPrompts ? "Custom prompt" : (detail?.category ?? "Capture")}
               {variant && ` · ${variantLabel(run.experiment, variant)}`}
               {detail?.worker != null && ` · ${workerLabel(detail.worker, detail.gpus)}`}
             </div>

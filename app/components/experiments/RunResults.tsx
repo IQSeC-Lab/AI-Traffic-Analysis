@@ -65,7 +65,9 @@ export function RunResults({ run, live }: { run: Run; live: boolean }) {
   const [open, setOpen] = useState<string | null>(null);
   const base = `/${run.experiment}/runs/${run.id}`;
   // What the run compares (temperature, model, network condition); the Data Collector compares nothing
-  const variable = EXPERIMENTS.find((e) => e.slug === run.experiment)?.variable;
+  const info = EXPERIMENTS.find((e) => e.slug === run.experiment);
+  const variable = info?.variable;
+  const byPrompt = info?.ownPrompts ?? false; // Custom Prompts: each prompt is its own category
   const variantOrder = useMemo(() => new Map(run.variants.map((v, i) => [v.key, i])), [run.variants]);
 
   const refresh = useCallback(() => {
@@ -110,6 +112,10 @@ export function RunResults({ run, live }: { run: Run; live: boolean }) {
     ["Response", s.median_response_chars != null ? `${formatNumber(s.median_response_chars, 0)} chars` : "—"],
     ["Generation", s.median_duration_s != null ? `${formatNumber(s.median_duration_s)} s` : "—"],
     ["Stream packets", formatNumber(s.median_stream_packets, 0)],
+    // One temperature for the whole run, unless it sweeps them. Runs from before it was recorded sampled at 0.7
+    ...(run.experiment !== "temperature-change"
+      ? [["Temperature", `${run.variants[0]?.temperature ?? 0.7}`] as [string, string]]
+      : []),
     ...(byWorker
       ? [["Workers", `${workers.length} · ${gpuText([...new Set(workers.flatMap((w) => w.gpus ?? []))].sort((a, b) => a - b))}`] as [string, string]]
       : []),
@@ -170,12 +176,12 @@ export function RunResults({ run, live }: { run: Run; live: boolean }) {
             <CompareChart data={data} series={series} variable={variable.one} height={200} className="col-span-8" />
             <GapChart data={data} series={series} height={240} className="col-span-7" />
             <SizeChart data={data} series={series} height={240} className="col-span-5" />
-            <CategoryChart data={data} series={series} height={240} className="col-span-12" />
+            <CategoryChart data={data} series={series} byPrompt={byPrompt} height={240} className="col-span-12" />
           </>
         ) : (
           <>
             <GapChart data={data} series={series} height={230} className="col-span-8" />
-            <CategoryChart data={data} series={series} height={240} className="col-span-7" />
+            <CategoryChart data={data} series={series} byPrompt={byPrompt} height={240} className="col-span-7" />
             <SizeChart data={data} series={series} height={240} className="col-span-5" />
           </>
         )}
@@ -209,7 +215,7 @@ export function RunResults({ run, live }: { run: Run; live: boolean }) {
                   <td className="py-2 pr-3 pl-5 whitespace-nowrap">
                     <span className="font-medium">#{String(c.prompt).padStart(2, "0")}</span>
                     {c.iteration != null && <span className="text-ink-3"> · {c.iteration}</span>}
-                    <div className="text-xs text-ink-3">{c.category}</div>
+                    {!byPrompt && <div className="text-xs text-ink-3">{c.category}</div>}
                   </td>
                   {variable && (
                     <td className="px-3 py-2 whitespace-nowrap">

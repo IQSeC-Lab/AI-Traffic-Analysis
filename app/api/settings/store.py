@@ -35,6 +35,20 @@ def hf_token() -> str | None:
     return load().get("hf_token") or os.environ.get("HF_TOKEN") or None
 
 
+# ── Sampling ─────────────────────────────────────────────────────────────────
+
+ORIGINAL_TEMPERATURE = 0.7   # what the original scripts sample at
+
+
+def default_temperature() -> float:
+    """Sampling temperature of every experiment that doesn't set its own (Settings → Sampling).
+    Temperature Change sweeps its own values. 0 is greedy decoding."""
+    value = load().get("default_temperature")
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 2:
+        return float(value)
+    return ORIGINAL_TEMPERATURE
+
+
 # ── Where experiment results go ──────────────────────────────────────────────
 
 def results_root() -> Path:

@@ -98,6 +98,8 @@ export function RunPage({ experiment, id, initialTab }: { experiment: string; id
   const meta = [
     ...(compares ? [compares] : []),
     hardwareLabel(run),
+    // Runs from before the temperature was recorded sampled at 0.7
+    ...(run.experiment !== "temperature-change" ? [`temperature ${run.variants[0]?.temperature ?? 0.7}`] : []),
     `${prompts} prompt${prompts === 1 ? "" : "s"}`,
     ...(run.config.repeat ? [`× ${run.config.repeat}`] : []),
     ...((run.config.workers ?? 1) > 1 ? [`${run.config.workers} workers`] : []),

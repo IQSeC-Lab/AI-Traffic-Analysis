@@ -34,6 +34,7 @@ import time
 import traceback
 import uuid
 from collections import Counter, deque
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -45,7 +46,7 @@ from system import detect_gpus
 
 from . import docker_cli as docker
 from . import scheduler
-from .base import Kind, RunConfig, Variant
+from .base import PROMPTS_FILE, Kind, RunConfig, Variant
 from .delay import netem_args
 from .kinds import KINDS
 
@@ -153,7 +154,8 @@ def _set_pulled_images(images: list[str]) -> None:
 
 
 class Experiment:
-    def __init__(self, kind: Kind, config: RunConfig, variants: list[Variant], need_mb: int, number: int):
+    def __init__(self, kind: Kind, config: RunConfig, variants: list[Variant], prompts: dict[int, dict],
+                 need_mb: int, number: int):
         self.kind   = kind
         self.id     = datetime.now().strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4]
         self.number = number                      # #1, #2, ... shown as the run's identifier
@@ -185,9 +187,10 @@ class Experiment:
         self.results_dir  = self.run_dir / "results"   # client output: response + per-event timing
         self.run_dir.mkdir(parents=True, exist_ok=True)
 
-        self.prompt_numbers = config.prompts or [p["number"] for p in prompt_library.all_prompts()]
-        # Fixed when the run is created, so editing the library mid-run doesn't change it
-        self.prompts = prompt_library.snapshot(self.prompt_numbers)
+        # Fixed when the run is created, so editing prompts mid-run (or later) doesn't change it
+        self.prompts = prompts
+        self.prompt_numbers = list(prompts)
+        (self.run_dir / PROMPTS_FILE).write_text(json.dumps(prompts, indent=1))
         self.total     = len(self.prompt_numbers) * (config.repeat or 1) * len(variants)
         self.completed = 0
         self._done_by_variant: Counter = Counter()
@@ -276,7 +279,8 @@ class Experiment:
             "step": self.step or (busy or {}).get("step"),
             "current": (busy or {}).get("current"),
             "workers": [dict(w) for w in self._workers],
-            "config": self.config.model_dump(exclude={"name"}),
+            # Prompt texts given to the run are in its prompts.json, not in every summary
+            "config": self.config.model_dump(exclude={"name", "prompt_texts"}),
             "models": self.models,
             "variants": [
                 {**v.as_dict(), "done": self._done_by_variant[v.key], "total": per_variant} for v in self.variants
@@ -328,6 +332,10 @@ class Experiment:
             self.log(f"Models  : {', '.join(self.models)}")
         if self.kind.variable and self.kind.variable != "Model":
             self.log(f"Compare : {' · '.join(v.label for v in self.variants)}")
+        temperatures = {v.temperature for v in self.variants}
+        if len(temperatures) == 1:   # not a temperature sweep
+            t = temperatures.pop()
+            self.log(f"Sampling: {'greedy (temperature 0)' if t == 0 else f'temperature {t:g}'}")
         where = lambda gpus: " ".join(_gpu_args(gpus)[1:]) or "none (CPU)"
         if len(self._workers) == 1:
             self.log(f"Network : {self._workers[0]['network']}  (--internal bridge, no internet routing)")
@@ -613,6 +621,7 @@ class Experiment:
                 **current,
                 "category": self.prompts[current["prompt"]]["category"],
                 "model": variant.model,
+                "temperature": variant.temperature,
                 **variant.columns,
                 "worker": k + 1,
                 "gpus": worker["gpus"],
@@ -722,14 +731,30 @@ class RunConflict(Exception):
     pass
 
 
-def submit(kind: Kind, config: RunConfig) -> Experiment:
-    """Queue a run. It starts right away when its hardware is free, otherwise when it frees up."""
-    known = {p["number"] for p in prompt_library.all_prompts()}
-    invalid = [n for n in config.prompts or [] if n not in known]
+def _library_prompts(config: RunConfig) -> dict[int, dict]:
+    """The prompts of a run that takes them from the prompt library: those chosen, or all."""
+    numbers = [p["number"] for p in prompt_library.all_prompts()]
+    invalid = [n for n in config.prompts or [] if n not in numbers]
     if invalid:
         raise ValueError(f"Unknown prompt number(s) {invalid}. See the prompt library.")
+    return prompt_library.snapshot(config.prompts or numbers)
 
-    variants = kind.variants(config)
+
+def with_default_temperature(variants: list[Variant]) -> list[Variant]:
+    """Variants that don't set a temperature get the default from Settings. Fixed when the run
+    is created, so it is recorded with the run and changing the setting never alters a run."""
+    default = settings_store.default_temperature()
+    return [
+        # Also a column of the metrics CSV, like the temperatures of a Temperature Change run
+        v if v.temperature is not None else replace(v, temperature=default, columns={**v.columns, "temperature": default})
+        for v in variants
+    ]
+
+
+def submit(kind: Kind, config: RunConfig) -> Experiment:
+    """Queue a run. It starts right away when its hardware is free, otherwise when it frees up."""
+    prompts = (kind.prompts or _library_prompts)(config)
+    variants = with_default_temperature(kind.variants(config))
     need_mb = 0
     for model in dict.fromkeys(v.model for v in variants):
         model_dir = MODELS_DIR / model_dir_name(model)
@@ -749,14 +774,14 @@ def submit(kind: Kind, config: RunConfig) -> Experiment:
         per_gpu = isinstance(config.gpus, list) and config.gpus and not config.split_model
         config.workers = len(config.gpus) if per_gpu else 1
     # A worker without captures would only hold on to GPU memory
-    captures = len(config.prompts or known) * (config.repeat or 1) * len(variants)
+    captures = len(prompts) * (config.repeat or 1) * len(variants)
     config.workers = min(config.workers, captures)
 
     gpus = detect_gpus() if config.gpus != [] else []
     scheduler.check_possible(config.gpus, need_mb, config.workers, gpus, config.split_model)
 
     with _lock:
-        run = Experiment(kind, config, variants, need_mb, _next_number())
+        run = Experiment(kind, config, variants, prompts, need_mb, _next_number())
         _runs[run.id] = run
         run._save()
     _ensure_scheduler()

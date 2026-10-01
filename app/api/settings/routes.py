@@ -25,6 +25,10 @@ class TokenRequest(BaseModel):
     token: str = Field(..., min_length=1)
 
 
+class TemperatureRequest(BaseModel):
+    temperature: float = Field(..., ge=0, le=2, description="0 is greedy decoding.")
+
+
 def _token_status() -> dict:
     saved = store.load()
     token = store.hf_token()
@@ -43,6 +47,8 @@ def _settings() -> dict:
         "results_dir": str(store.results_root()),
         "results_default": str(DATA_DIR),
         "results_dirs": [str(p) for p in store.results_roots()],
+        "default_temperature": store.default_temperature(),
+        "original_temperature": store.ORIGINAL_TEMPERATURE,
     }
 
 
@@ -70,6 +76,21 @@ def set_results_dir(req: ResultsDirRequest) -> dict:
 @router.delete("/results-dir")
 def reset_results_dir() -> dict:
     store.set_results_root(None)
+    return _settings()
+
+
+@router.put("/default-temperature")
+def set_default_temperature(req: TemperatureRequest) -> dict:
+    """The sampling temperature of new runs of every experiment except Temperature Change,
+    which sets its own. Runs keep the temperature they started with."""
+    store.update(default_temperature=round(req.temperature, 2))
+    return _settings()
+
+
+@router.delete("/default-temperature")
+def reset_default_temperature() -> dict:
+    """Back to 0.7, the temperature of the original scripts."""
+    store.update(default_temperature=None)
     return _settings()
 
 
