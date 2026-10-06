@@ -73,7 +73,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           <Radar className="h-4.5 w-4.5" strokeWidth={2} />
         </div>
         <div className="leading-tight">
-          <div className="text-sm font-semibold tracking-tight">MaLLM</div>
+          <div className="text-sm font-semibold tracking-tight">RogueAgent</div>
           <div className="text-[11px] text-ink-3">LLM traffic fingerprinting</div>
         </div>
       </Link>
@@ -183,7 +183,7 @@ export function Sidebar() {
       {/* Mobile */}
       <div className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-hairline bg-page px-4 lg:hidden">
         <Link href="/" className="flex items-center gap-2 text-sm font-semibold">
-          <Radar className="h-4 w-4 text-accent" /> MaLLM
+          <Radar className="h-4 w-4 text-accent" /> RogueAgent
         </Link>
         <button type="button" onClick={() => setOpen(true)} className="rounded-lg p-2 hover:bg-surface-2" aria-label="Open menu">
           <Menu className="h-5 w-5" />

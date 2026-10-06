@@ -32,7 +32,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="MaLLM Web API",
+    title="RogueAgent Web API",
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
     lifespan=lifespan,

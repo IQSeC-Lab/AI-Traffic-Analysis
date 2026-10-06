@@ -550,7 +550,7 @@ class Experiment:
         # tc itself failed, and would for every capture
         raise FatalRunError(
             f"Could not add the network delay with tc netem: {error}. The host kernel needs the "
-            "sch_netem module; load it with `sudo modprobe sch_netem` and start the run again."
+            "sch_netem module; ask the host administrator to load/enable sch_netem, then start the run again."
         )
 
     def _start_capture(self, k: int, inf_container: str, stem: str) -> str:
