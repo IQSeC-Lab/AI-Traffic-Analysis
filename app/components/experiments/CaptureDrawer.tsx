@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 
 import { api, type CaptureDetail, type Run } from "@/lib/api";
-import { EXPERIMENTS } from "@/lib/experiments";
+import { EXPERIMENTS, hasOwnPrompts } from "@/lib/experiments";
 import { formatBytes, formatMs, formatNumber, workerLabel } from "@/lib/format";
 import { ChartCard } from "@/components/charts/ChartCard";
 import { SpikeTimeline } from "@/components/charts/SpikeTimeline";
@@ -32,7 +32,7 @@ export function CaptureDrawer({ run, captureKey, onClose }: { run: Run; captureK
   }, [onClose]);
 
   const m = detail?.metrics;
-  // Which temperature, model or network condition it was captured with
+  // Which temperature, model, network condition or scenario it was captured with
   const info = EXPERIMENTS.find((e) => e.slug === run.experiment);
   const variant = info?.variable
     ? run.variants.find((v) => v.key === detail?.variant)
@@ -44,7 +44,7 @@ export function CaptureDrawer({ run, captureKey, onClose }: { run: Run; captureK
         <div className="flex items-start justify-between gap-4 border-b border-hairline bg-surface px-6 py-4">
           <div>
             <div className="text-xs font-medium text-ink-3">
-              {info?.ownPrompts ? "Custom prompt" : (detail?.category ?? "Capture")}
+              {hasOwnPrompts(run) ? "Custom prompt" : (detail?.category ?? "Capture")}
               {variant && ` · ${variantLabel(run.experiment, variant)}`}
               {detail?.worker != null && ` · ${workerLabel(detail.worker, detail.gpus)}`}
             </div>

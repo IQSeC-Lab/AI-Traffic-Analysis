@@ -13,7 +13,7 @@ import { useConfirm } from "@/components/ConfirmDialog";
 import { formatBytes, hardwareLabel } from "@/lib/format";
 import { RunMonitor } from "./RunMonitor";
 import { RunResults } from "./RunResults";
-import { RunBadge, comparesText, runTitle } from "./RunBadge";
+import { RunBadge, comparesText, runTemperature, runTitle } from "./RunBadge";
 
 type Tab = "monitor" | "results";
 
@@ -95,11 +95,11 @@ export function RunPage({ experiment, id, initialTab }: { experiment: string; id
   const current: Tab = tab ?? (active || run.outputs.pcaps === 0 ? "monitor" : "results");
   const prompts = run.prompt_count ?? run.config.prompts?.length ?? 60;
   const compares = comparesText(run);
+  const temperature = runTemperature(run);
   const meta = [
     ...(compares ? [compares] : []),
     hardwareLabel(run),
-    // Runs from before the temperature was recorded sampled at 0.7
-    ...(run.experiment !== "temperature-change" ? [`temperature ${run.variants[0]?.temperature ?? 0.7}`] : []),
+    ...(temperature != null ? [`temperature ${temperature}`] : []),
     `${prompts} prompt${prompts === 1 ? "" : "s"}`,
     ...(run.config.repeat ? [`× ${run.config.repeat}`] : []),
     ...((run.config.workers ?? 1) > 1 ? [`${run.config.workers} workers`] : []),

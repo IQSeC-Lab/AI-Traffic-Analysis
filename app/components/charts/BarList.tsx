@@ -31,7 +31,7 @@ export function BarList({
       >
         {rows.map((r) => (
           <div key={r.id} className="contents" title={r.note ? `${r.label} · ${r.note}` : r.label}>
-            <span className="flex max-w-56 min-w-0 items-center gap-2 text-ink-2">
+            <span className="flex max-w-96 min-w-0 items-center gap-2 text-ink-2">
               <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: r.color }} />
               <span className="truncate">{r.label}</span>
             </span>

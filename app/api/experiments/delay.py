@@ -47,7 +47,7 @@ def netem_args(network: dict) -> list[str]:
     return args
 
 
-def _describe(c: NetworkCondition) -> tuple[str, str]:
+def describe(c: NetworkCondition) -> tuple[str, str]:
     """(label, file name part) of a condition."""
     if not c.delay_ms:
         return "No delay", "d0ms"
@@ -63,7 +63,7 @@ def variants(config: DelayConfig) -> list[Variant]:
     for c in config.conditions:
         if c.jitter_ms and not c.delay_ms:
             raise ValueError(f"A jitter of {c.jitter_ms} ms needs a delay. Set a delay for that condition.")
-        label, part = _describe(c)
+        label, part = describe(c)
         key = f"{base}-{part}"
         if any(v.key == key for v in found):
             raise ValueError(f"The condition {label} is listed twice.")

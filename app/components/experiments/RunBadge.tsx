@@ -10,6 +10,16 @@ export const runTitle = (run: Pick<Run, "name" | "models">) => {
   return rest.length ? `${modelName(first)} +${rest.length}` : modelName(first);
 };
 
+/**
+ * The temperature a whole run sampled at. Null when its variants differ: a Temperature Change
+ * run, or a Custom Experiment with several. Runs from before it was recorded sampled at 0.7.
+ */
+export function runTemperature(run: Pick<Run, "experiment" | "variants">): number | null {
+  if (run.experiment === "temperature-change") return null;
+  const temperatures = new Set(run.variants.map((v) => v.temperature ?? 0.7));
+  return temperatures.size === 1 ? [...temperatures][0] : null;
+}
+
 /** Chart color of the run's i-th variant (the validated series palette). */
 export const variantColor = (i: number) => `var(--series-${(i % 8) + 1})`;
 

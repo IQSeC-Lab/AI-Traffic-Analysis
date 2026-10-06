@@ -23,6 +23,9 @@ export type LocalModel = {
   gpu_memory_mb?: number | null; // rough estimate to load it and generate
 };
 
+/** What the experiment API accepts as `model`: the repo id when known, else the folder name. */
+export const modelRef = (m: LocalModel) => m.model ?? m.folder;
+
 export type Download = {
   id: string;
   model: string;
@@ -55,7 +58,7 @@ export type Settings = {
   results_dir: string; // where new runs are saved
   results_default: string;
   results_dirs: string[]; // every folder runs were saved in (all still listed)
-  default_temperature: number; // sampling temperature of new runs, except Temperature Change's
+  default_temperature: number; // sampling temperature of new runs that don't set their own
   original_temperature: number; // what the original scripts sample at (0.7)
 };
 
@@ -69,7 +72,7 @@ export type Prompt = {
 
 export type PromptCategory = { name: string; count: number; builtin: boolean };
 
-/** The Custom Prompts experiment's own prompts, kept apart from the prompt library. */
+/** An experiment's own prompts (Custom Prompts, the Custom Experiment), kept apart from the prompt library. */
 export type CustomPrompts = {
   prompts: string[]; // the saved set (the crafted prompts until something is saved)
   crafted: string[]; // the 10 prompts of 4-Crafted-Prompts
@@ -85,12 +88,24 @@ export type NetworkCondition = {
   distribution: "normal" | "pareto" | "paretonormal"; // shape of the jitter
 };
 
+export const DISTRIBUTIONS: NetworkCondition["distribution"][] = ["normal", "pareto", "paretonormal"];
+
+/** One scenario of a Custom Experiment run. */
+export type Scenario = {
+  model: string;
+  temperature: number | null; // null: the default from Settings
+  network: NetworkCondition; // no delay: left as it is
+  label: string | null; // null: named by what sets it apart from the others
+};
+
 export type RunConfig = {
-  model?: string; // every experiment but Scalability
+  model?: string; // every experiment but Scalability and the Custom Experiment
   models?: string[]; // Scalability: the models compared
+  scenarios?: Scenario[]; // Custom Experiment
+  prompt_source?: "library" | "written"; // Custom Experiment: prompt library numbers, or prompts written for it
   temperatures?: number[]; // Temperature Change: 0 is greedy decoding
   conditions?: NetworkCondition[]; // Delay
-  prompt_texts?: string[]; // Custom Prompts: the prompts themselves (only sent when starting a run)
+  prompt_texts?: string[]; // written prompts: the prompts themselves (only sent when starting a run)
   prompts: number[] | null; // prompt library numbers, null = all. Not used by Custom Prompts
   repeat: number | null;
   gpus: number[] | "auto"; // "auto" = spread over the GPUs with room; [] = CPU
@@ -112,7 +127,7 @@ export type RunWorker = {
   step: string | null;
 };
 
-/** One setting a run compares: a temperature, a model, a network condition. The Data Collector has one. */
+/** One setting a run compares: a temperature, a model, a network condition, a scenario. The Data Collector has one. */
 export type Variant = {
   key: string; // its captures are <key>-pNN
   label: string;

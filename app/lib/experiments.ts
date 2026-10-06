@@ -1,4 +1,4 @@
-import { Layers, PenLine, Radar, Thermometer, Timer, type LucideIcon } from "lucide-react";
+import { Layers, PenLine, Radar, SlidersHorizontal, Thermometer, Timer, type LucideIcon } from "lucide-react";
 
 export type ExperimentInfo = {
   slug: string;
@@ -9,13 +9,18 @@ export type ExperimentInfo = {
   available: boolean;
   /** What a run compares (its variants), in lowercase: "temperature". None for the Data Collector. */
   variable?: { one: string; many: string };
+  /** A run is a list of scenarios, each with its own model, temperature and network condition. */
+  scenarios?: boolean;
   /** New run form defaults, as in the original experiment's scripts. */
   defaults?: { category?: string; repeat?: number };
   /** Its prompts are written in the experiment itself instead of chosen from the prompt library. */
   ownPrompts?: boolean;
 };
 
-// The experiments from the repo (2-6).
+// A run compares at most 8 temperatures, models, network conditions or scenarios: one chart color each.
+export const MAX_VARIANTS = 8;
+
+// The experiments from the repo (2-6), then the one the app adds.
 export const EXPERIMENTS: ExperimentInfo[] = [
   {
     slug: "data-collector",
@@ -72,12 +77,27 @@ export const EXPERIMENTS: ExperimentInfo[] = [
     // 6-Delay: the 10 logical reasoning puzzles, 10 times each (r1.py)
     defaults: { category: "Logical Reasoning & Puzzles", repeat: 10 },
   },
+  {
+    slug: "custom-experiment",
+    name: "Custom Experiment",
+    summary: "Your own scenarios",
+    description:
+      "A run you set up yourself, with every setting the other experiments have. Each scenario has its own model, sampling temperature and network condition, and every prompt is captured once per scenario.",
+    icon: SlidersHorizontal,
+    available: true,
+    variable: { one: "scenario", many: "scenarios" },
+    scenarios: true,
+  },
 ];
 
 /** An experiment that can be opened in the app, by slug. */
 export const availableExperiment = (slug: string) => EXPERIMENTS.find((e) => e.slug === slug && e.available);
 
 export const experimentName = (slug: string) => EXPERIMENTS.find((e) => e.slug === slug)?.name ?? slug;
+
+/** Whether a run's prompts were written for it: always in Custom Prompts, by choice in a Custom Experiment. Its results then go prompt by prompt. */
+export const hasOwnPrompts = (run: { experiment: string; config: { prompt_source?: string } }) =>
+  run.config.prompt_source === "written" || (EXPERIMENTS.find((e) => e.slug === run.experiment)?.ownPrompts ?? false);
 
 export const experimentHref = (slug: string) => `/experiments/${slug}`;
 export const runHref = (run: { experiment: string; id: string }) => `/experiments/${run.experiment}/runs/${run.id}`;

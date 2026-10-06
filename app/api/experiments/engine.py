@@ -39,14 +39,13 @@ from datetime import datetime
 from pathlib import Path
 
 from console import console
-from prompt_library import store as prompt_library
 from settings import store as settings_store
 from storage import DATA_DIR, MODELS_DIR, estimate_gpu_memory_mb, has_weights, model_dir_name
 from system import detect_gpus
 
 from . import docker_cli as docker
 from . import scheduler
-from .base import PROMPTS_FILE, Kind, RunConfig, Variant
+from .base import PROMPTS_FILE, Kind, RunConfig, Variant, library_prompts
 from .delay import netem_args
 from .kinds import KINDS
 
@@ -331,7 +330,7 @@ class Experiment:
         else:
             self.log(f"Models  : {', '.join(self.models)}")
         if self.kind.variable and self.kind.variable != "Model":
-            self.log(f"Compare : {' · '.join(v.label for v in self.variants)}")
+            self.log(f"Compare : {' | '.join(v.label for v in self.variants)}")
         temperatures = {v.temperature for v in self.variants}
         if len(temperatures) == 1:   # not a temperature sweep
             t = temperatures.pop()
@@ -731,15 +730,6 @@ class RunConflict(Exception):
     pass
 
 
-def _library_prompts(config: RunConfig) -> dict[int, dict]:
-    """The prompts of a run that takes them from the prompt library: those chosen, or all."""
-    numbers = [p["number"] for p in prompt_library.all_prompts()]
-    invalid = [n for n in config.prompts or [] if n not in numbers]
-    if invalid:
-        raise ValueError(f"Unknown prompt number(s) {invalid}. See the prompt library.")
-    return prompt_library.snapshot(config.prompts or numbers)
-
-
 def with_default_temperature(variants: list[Variant]) -> list[Variant]:
     """Variants that don't set a temperature get the default from Settings. Fixed when the run
     is created, so it is recorded with the run and changing the setting never alters a run."""
@@ -753,7 +743,7 @@ def with_default_temperature(variants: list[Variant]) -> list[Variant]:
 
 def submit(kind: Kind, config: RunConfig) -> Experiment:
     """Queue a run. It starts right away when its hardware is free, otherwise when it frees up."""
-    prompts = (kind.prompts or _library_prompts)(config)
+    prompts = (kind.prompts or library_prompts)(config)
     variants = with_default_temperature(kind.variants(config))
     need_mb = 0
     for model in dict.fromkeys(v.model for v in variants):

@@ -10,6 +10,7 @@ or writes the prompt library.
 
 import json
 import os
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter
@@ -126,38 +127,28 @@ class CustomPromptsConfig(RunConfig):
 
 
 # ── The experiment's saved prompts ───────────────────────────────────────────
+# The Custom Experiment keeps its written prompts the same way, in a file of its own.
 
-def saved_prompts() -> list[str]:
-    """The prompts being worked on: what was last saved, or the crafted prompts before any save."""
+def saved_prompts(file: Path = SAVED_FILE, default: list[str] = CRAFTED_PROMPTS) -> list[str]:
+    """The prompts being worked on: what was last saved, or `default` (the crafted prompts) before any save."""
     try:
-        texts = json.loads(SAVED_FILE.read_text())["prompts"]
+        texts = json.loads(file.read_text())["prompts"]
         if isinstance(texts, list) and all(isinstance(t, str) for t in texts):
             return texts
     except (OSError, ValueError, KeyError, TypeError):
         pass
-    return list(CRAFTED_PROMPTS)
+    return list(default)
 
 
-def save_prompts(texts: list[str]) -> None:
+def save_prompts(texts: list[str], file: Path = SAVED_FILE) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = SAVED_FILE.with_suffix(".json.tmp")
+    tmp = file.with_suffix(".json.tmp")
     tmp.write_text(json.dumps({"prompts": texts}, indent=2))
-    os.replace(tmp, SAVED_FILE)
+    os.replace(tmp, file)
 
 
-# ── The experiment ───────────────────────────────────────────────────────────
-
-def variants(config: CustomPromptsConfig) -> list[Variant]:
-    # Captures keep the names of 4-Crafted-Prompts: <model>-pNN.pcap
-    return [Variant(key=model_dir_name(config.model), label=config.model, model=config.model)]
-
-
-def prompts(config: CustomPromptsConfig) -> dict[int, dict]:
-    """The run's prompts, numbered from 1. Each is its own category, so results compare them one by one."""
-    if config.prompts is not None:
-        raise ValueError("Custom Prompts runs take the prompts themselves in prompt_texts, "
-                         "not prompt library numbers in prompts.")
-    texts = config.prompt_texts if config.prompt_texts is not None else saved_prompts()
+def numbered(texts: list[str]) -> dict[int, dict]:
+    """Prompts written for a run, numbered from 1. Each is its own category, so results compare them one by one."""
     if not texts:
         raise ValueError("There are no prompts to run. Add at least one.")
     if len(texts) > MAX_PROMPTS:
@@ -168,35 +159,54 @@ def prompts(config: CustomPromptsConfig) -> dict[int, dict]:
     return {n: {"text": text, "category": f"Prompt {n}"} for n, text in enumerate(texts, start=1)}
 
 
+# ── The experiment ───────────────────────────────────────────────────────────
+
+def variants(config: CustomPromptsConfig) -> list[Variant]:
+    # Captures keep the names of 4-Crafted-Prompts: <model>-pNN.pcap
+    return [Variant(key=model_dir_name(config.model), label=config.model, model=config.model)]
+
+
+def prompts(config: CustomPromptsConfig) -> dict[int, dict]:
+    """The run's prompts: those given, or the saved ones."""
+    if config.prompts is not None:
+        raise ValueError("Custom Prompts runs take the prompts themselves in prompt_texts, "
+                         "not prompt library numbers in prompts.")
+    return numbered(config.prompt_texts if config.prompt_texts is not None else saved_prompts())
+
+
 KIND = Kind(slug="custom-prompts", title="Custom Prompts", config=CustomPromptsConfig, variants=variants, prompts=prompts)
 
 
 # ── Endpoints for the saved prompts, next to the experiment's runs ───────────
 
-router = APIRouter(prefix=f"/{KIND.slug}", tags=[KIND.title])
-
-
 class SavedPrompts(BaseModel):
     prompts: list[PromptText] = Field(..., max_length=MAX_PROMPTS)
 
 
-def _saved() -> dict:
-    return {
-        "prompts": saved_prompts(),
-        "crafted": CRAFTED_PROMPTS,
-        "max_prompts": MAX_PROMPTS,
-        "max_chars": MAX_PROMPT_CHARS,
-    }
+def saved_prompts_router(kind: Kind, file: Path = SAVED_FILE, default: list[str] = CRAFTED_PROMPTS) -> APIRouter:
+    """GET and PUT /api/<slug>/prompts: an experiment's saved prompts, kept in `file`."""
+    router = APIRouter(prefix=f"/{kind.slug}", tags=[kind.title])
+
+    def _saved() -> dict:
+        return {
+            "prompts": saved_prompts(file, default),
+            "crafted": CRAFTED_PROMPTS,
+            "max_prompts": MAX_PROMPTS,
+            "max_chars": MAX_PROMPT_CHARS,
+        }
+
+    @router.get("/prompts")
+    def get_prompts() -> dict:
+        """The experiment's saved prompts (its starting ones until something is saved), and the crafted ones."""
+        return _saved()
+
+    @router.put("/prompts")
+    def put_prompts(body: SavedPrompts) -> dict:
+        """Save the prompts being worked on. Drafts are fine: empty ones are only refused when starting a run."""
+        save_prompts(body.prompts, file)
+        return _saved()
+
+    return router
 
 
-@router.get("/prompts")
-def get_prompts() -> dict:
-    """The experiment's saved prompts (the crafted prompts until something is saved), and the crafted ones."""
-    return _saved()
-
-
-@router.put("/prompts")
-def put_prompts(body: SavedPrompts) -> dict:
-    """Save the prompts being worked on. Drafts are fine: empty ones are only refused when starting a run."""
-    save_prompts(body.prompts)
-    return _saved()
+router = saved_prompts_router(KIND)

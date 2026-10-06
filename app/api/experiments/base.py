@@ -5,8 +5,8 @@ All experiments run the same capture (see engine.py): a fresh inference containe
 per prompt, a tcpdump sidecar sharing its network, and a client on an isolated
 network. An experiment is defined by its settings and by the variants it compares:
 the Data Collector has one, Temperature Change one per temperature, Scalability
-one per model and Delay one per network condition. Every prompt (and repetition)
-is captured once per variant.
+one per model, Delay one per network condition and the Custom Experiment one per
+scenario. Every prompt (and repetition) is captured once per variant.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from typing import Annotated, Callable, Literal
 
 from pydantic import BaseModel, Field
 
+from prompt_library import store as prompt_library
 from storage import MODEL_REF_PATTERN
 
 NAME_MAX = 60
@@ -61,6 +62,15 @@ class RunConfig(BaseModel):
     name: str | None = Field(None, max_length=NAME_MAX, description="Optional name to recognize the run by.")
 
 
+def library_prompts(config: RunConfig) -> dict[int, dict]:
+    """The prompts of a run that takes them from the prompt library: those chosen, or all."""
+    numbers = [p["number"] for p in prompt_library.all_prompts()]
+    invalid = [n for n in config.prompts or [] if n not in numbers]
+    if invalid:
+        raise ValueError(f"Unknown prompt number(s) {invalid}. See the prompt library.")
+    return prompt_library.snapshot(config.prompts or numbers)
+
+
 @dataclass(frozen=True)
 class Variant:
     """One setting an experiment compares. Its captures are <key>-pNN.pcap, <key>-pNN.json, ..."""
@@ -91,7 +101,7 @@ class Kind:
     variants: Callable[[RunConfig], list[Variant]]   # raises ValueError for settings that can't run
     variable: str | None = None                   # what the variants vary ("Temperature"); None with one variant
     # The run's prompts as {number: {"text", "category"}}, raising ValueError when they can't run.
-    # None: prompt numbers from the prompt library (config.prompts, all of them when omitted).
+    # None: prompt numbers from the prompt library (library_prompts).
     prompts: Callable[[RunConfig], dict[int, dict]] | None = None
 
     @property

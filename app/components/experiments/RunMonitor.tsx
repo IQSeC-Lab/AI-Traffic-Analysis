@@ -58,7 +58,8 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
   const eta = active && completed > 0 ? ((end - started) / completed) * (total - completed) : null;
   const phase = phaseIndex(run);
   const workers = run.workers ?? [];
-  const variable = EXPERIMENTS.find((e) => e.slug === run.experiment)?.variable;
+  const info = EXPERIMENTS.find((e) => e.slug === run.experiment);
+  const variable = info?.variable;
 
   return (
     <div className="space-y-6">
@@ -165,7 +166,8 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
             title={`Progress by ${variable.one}`}
             description={`Every prompt is captured once per ${variable.one}. They take turns, so each ${variable.one} advances at the same pace.`}
           >
-            <div className="grid grid-cols-4 gap-3">
+            {/* A scenario's label can name a model, a temperature and a network condition, so its card is wider */}
+            <div className={`grid gap-3 ${info?.scenarios ? "grid-cols-2" : "grid-cols-4"}`}>
               {run.variants.map((v, i) => {
                 const done = v.done ?? 0;
                 const total = v.total ?? 0;

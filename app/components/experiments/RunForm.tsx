@@ -6,7 +6,9 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Check, X } from "lucide-react";
 
 import {
+  DISTRIBUTIONS,
   api,
+  modelRef,
   type LocalModel,
   type ModelsResponse,
   type NetworkCondition,
@@ -17,32 +19,21 @@ import {
   type Settings,
   type SystemInfo,
 } from "@/lib/api";
-import { EXPERIMENTS, runHref } from "@/lib/experiments";
-import { formatBytes } from "@/lib/format";
+import { EXPERIMENTS, MAX_VARIANTS, runHref } from "@/lib/experiments";
+import { conditionLabel, formatBytes } from "@/lib/format";
 import { Alert, ButtonLink, Field, Loading, Segmented, Spinner, buttonClass, inputClass } from "@/components/ui";
 import { PromptDialog } from "@/components/prompts/PromptDialog";
 import { CustomPromptsEditor } from "./CustomPromptsEditor";
 import { Section } from "./FormSection";
 import { variantColor } from "./RunBadge";
+import { ScenariosEditor, newScenario, scenarioProblem, toScenario, type ScenarioDraft } from "./ScenariosEditor";
 
-// What the experiment API accepts as `model`: the repo id when known, else the folder name.
-const modelRef = (m: LocalModel) => m.model ?? m.folder;
-
-// A run compares at most 8 temperatures, models or network conditions: one chart color each.
-const MAX_VARIANTS = 8;
 const TEMPERATURE_PRESETS = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.2, 1.5, 2];
 // 6-Delay's r1.py used 500 ms with 50 ms of jitter; no delay is the baseline to compare against.
 const DEFAULT_CONDITIONS: NetworkCondition[] = [
   { delay_ms: 0, jitter_ms: 0, distribution: "normal" },
   { delay_ms: 500, jitter_ms: 50, distribution: "normal" },
 ];
-const DISTRIBUTIONS: NetworkCondition["distribution"][] = ["normal", "pareto", "paretonormal"];
-
-/** How a network condition is named, as the API labels it. */
-function conditionLabel(c: NetworkCondition) {
-  if (!c.delay_ms) return c.jitter_ms ? `${c.jitter_ms} ms jitter` : "No delay";
-  return c.jitter_ms ? `${c.delay_ms} ms ± ${c.jitter_ms} ms, ${c.distribution}` : `${c.delay_ms} ms`;
-}
 
 /** Why a network condition can't run, if it can't: jitter without delay, or a duplicate of an earlier one. */
 function conditionProblem(conditions: NetworkCondition[], i: number): string | null {
@@ -91,8 +82,10 @@ export function RunForm({ experiment }: { experiment: string }) {
   const router = useRouter();
   const info = EXPERIMENTS.find((e) => e.slug === experiment);
   const multiModel = experiment === "scalability";
-  const ownPrompts = info?.ownPrompts ?? false; // Custom Prompts: written here, not chosen from the library
+  const byScenario = info?.scenarios ?? false; // Custom Experiment: each scenario has its own model, temperature and network
+  const writesPrompts = info?.ownPrompts ?? false; // Custom Prompts: written here, not chosen from the library
   const sweepsTemperature = experiment === "temperature-change";
+  const setsTemperature = sweepsTemperature || byScenario; // instead of sampling at the default in Settings
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [models, setModels] = useState<LocalModel[] | null>(null);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
@@ -103,6 +96,10 @@ export function RunForm({ experiment }: { experiment: string }) {
   const [temperatures, setTemperatures] = useState<number[]>([0.3, 0.7, 0.9]);
   const [customTemperature, setCustomTemperature] = useState("");
   const [conditions, setConditions] = useState<NetworkCondition[]>(DEFAULT_CONDITIONS);
+  const [scenarios, setScenarios] = useState<ScenarioDraft[]>([]); // Custom Experiment
+  // Custom Experiment: prompts from the library, or written for it as in Custom Prompts
+  const [promptSource, setPromptSource] = useState<"library" | "written">("library");
+  const ownPrompts = writesPrompts || (byScenario && promptSource === "written");
   const [gpuMode, setGpuMode] = useState<"auto" | "manual" | "cpu">("auto");
   const [gpus, setGpus] = useState<number[]>([]); // when choosing GPUs by hand
   const [split, setSplit] = useState(false); // chosen GPUs: split one copy across them instead of one copy each
@@ -124,7 +121,7 @@ export function RunForm({ experiment }: { experiment: string }) {
       api<SystemInfo>("/system"),
       api<ModelsResponse>("/settings/models"),
       // Custom Prompts never reads the prompt library
-      ownPrompts ? Promise.resolve<PromptLibrary>({ prompts: [], categories: [] }) : api<PromptLibrary>("/prompts"),
+      writesPrompts ? Promise.resolve<PromptLibrary>({ prompts: [], categories: [] }) : api<PromptLibrary>("/prompts"),
       api<Run[]>("/experiments/active"),
       api<Settings>("/settings"),
     ])
@@ -136,6 +133,7 @@ export function RunForm({ experiment }: { experiment: string }) {
         setModels(ready);
         setModel(ready[0] ? modelRef(ready[0]) : "");
         setModelsChosen(ready[0] ? [modelRef(ready[0])] : []);
+        setScenarios([newScenario(ready[0] ? modelRef(ready[0]) : "", settings.default_temperature)]);
         // Several GPUs: one copy of the model on each, dividing the prompts, unless the user picks otherwise
         setGpuMode(sys.gpus.length > 1 ? "manual" : sys.gpus.length > 0 ? "auto" : "cpu");
         setGpus(sys.gpus.map((g) => g.index));
@@ -148,7 +146,7 @@ export function RunForm({ experiment }: { experiment: string }) {
         setDefaultTemperature(settings.default_temperature);
       })
       .catch((e: Error) => setError(e.message));
-  }, [multiModel, ownPrompts, info]);
+  }, [multiModel, writesPrompts, info]);
 
   const categories = useMemo(() => {
     const groups = new Map<string, Prompt[]>();
@@ -199,9 +197,10 @@ export function RunForm({ experiment }: { experiment: string }) {
     });
   }
 
-  // How many temperatures, models or network conditions: every prompt is captured once per variant
-  const variantCount =
-    experiment === "temperature-change"
+  // How many temperatures, models, network conditions or scenarios: every prompt is captured once per variant
+  const variantCount = byScenario
+    ? scenarios.length
+    : experiment === "temperature-change"
       ? temperatures.length
       : multiModel
         ? modelsChosen.length
@@ -211,7 +210,8 @@ export function RunForm({ experiment }: { experiment: string }) {
   const variantsOk =
     variantCount >= 1 &&
     variantCount <= MAX_VARIANTS &&
-    (experiment !== "delay" || conditions.every((_, i) => !conditionProblem(conditions, i)));
+    (experiment !== "delay" || conditions.every((_, i) => !conditionProblem(conditions, i))) &&
+    (!byScenario || scenarios.every((_, i) => !scenarioProblem(scenarios, i)));
 
   const promptCount = ownPrompts ? (customPrompts?.length ?? 0) : selected.size;
   const promptsOk = ownPrompts
@@ -231,7 +231,11 @@ export function RunForm({ experiment }: { experiment: string }) {
     setStarting(true);
     setError(null);
     const config: Partial<RunConfig> = {
-      ...(multiModel ? { models: modelsChosen } : { model }),
+      ...(byScenario
+        ? { scenarios: scenarios.map(toScenario), prompt_source: promptSource }
+        : multiModel
+          ? { models: modelsChosen }
+          : { model }),
       ...(experiment === "temperature-change" && { temperatures }),
       ...(experiment === "delay" && { conditions }),
       gpus: !onGpu ? [] : gpuMode === "auto" ? "auto" : gpus,
@@ -259,16 +263,13 @@ export function RunForm({ experiment }: { experiment: string }) {
 
   const total = promptCount * Math.max(1, repeat) * variantCount;
   // Workers load one model at a time, so a run of several reserves room for the largest
-  const chosen = models.filter((m) => (multiModel ? modelsChosen.includes(modelRef(m)) : modelRef(m) === model));
+  const modelRefs = byScenario ? scenarios.map((s) => s.model) : multiModel ? modelsChosen : [model];
+  const chosen = models.filter((m) => modelRefs.includes(modelRef(m)));
+  const severalModels = chosen.length > 1;
   const needMb = chosen.some((m) => m.gpu_memory_mb != null) ? Math.max(...chosen.map((m) => m.gpu_memory_mb ?? 0)) : null;
   const shortName = (ref: string) => ref.split("/").pop() ?? ref;
-  const modelText = multiModel
-    ? modelsChosen.length === 1
-      ? shortName(modelsChosen[0])
-      : `${modelsChosen.length} models`
-    : model
-      ? shortName(model)
-      : "—";
+  const modelText =
+    chosen.length === 1 ? shortName(modelRef(chosen[0])) : multiModel || severalModels ? `${chosen.length} models` : "—";
   const gb = (mb: number) => `${(mb / 1024).toFixed(1)} GB`;
   const hardware = !onGpu
     ? "CPU"
@@ -293,68 +294,85 @@ export function RunForm({ experiment }: { experiment: string }) {
     : [];
   const canStart =
     system.docker.available &&
-    (multiModel ? modelsChosen.length > 0 : model) &&
+    (byScenario || (multiModel ? modelsChosen.length > 0 : model)) &&
     variantsOk &&
     promptsOk &&
     !starting &&
     !(onGpu && gpuMode === "manual" && gpus.length === 0);
   const selectedCategories = categories.filter(([, items]) => items.some((p) => selected.has(p.number))).length;
+  // Custom Experiment: shown at the top of whichever prompts section is open
+  const promptSourceToggle = byScenario && (
+    <div className="mb-4">
+      <Segmented
+        value={promptSource}
+        onChange={setPromptSource}
+        options={[
+          { value: "library", label: "From the prompt library" },
+          { value: "written", label: "Written here" },
+        ]}
+      />
+    </div>
+  );
 
   return (
     <div className="grid items-start gap-6 lg:grid-cols-[1fr_20rem]">
       <div className="space-y-6">
-        <Section
-          title={multiModel ? "Models" : "Model"}
-          description={
-            multiModel
-              ? `Models downloaded on this machine, smallest first. Pick up to ${MAX_VARIANTS}: every one gets the same prompts, so the model is the only thing that changes.`
-              : "Models downloaded on this machine."
-          }
-          action={
-            <ButtonLink href="/settings#models" variant="secondary" size="sm">
-              Download more
-            </ButtonLink>
-          }
-        >
-          {models.length > 0 ? (
-            <div className="grid gap-2 sm:grid-cols-2">
-              {models.map((m) => {
-                const ref = modelRef(m);
-                const picked = multiModel ? modelsChosen.includes(ref) : model === ref;
-                const full = multiModel && !picked && modelsChosen.length >= MAX_VARIANTS;
-                const color = multiModel && picked ? variantColor(modelsChosen.indexOf(ref)) : null;
-                return (
-                  <SelectCard
-                    key={m.folder}
-                    role={multiModel ? "checkbox" : "radio"}
-                    selected={picked}
-                    onClick={() => (multiModel ? !full && toggleModel(ref) : setModel(ref))}
-                  >
-                    <div className={`flex items-center gap-2 pr-6 text-sm font-medium ${full ? "text-ink-3" : ""}`}>
-                      {color && <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />}
-                      <span className="truncate">{ref.split("/").pop()}</span>
-                    </div>
-                    <div className="mt-0.5 truncate text-xs text-ink-3">
-                      {m.model?.split("/")[0] ?? "local"} · {formatBytes(m.size_bytes)}
-                      {multiModel && m.gpu_memory_mb != null && ` · ~${gb(m.gpu_memory_mb)} GPU`}
-                    </div>
-                  </SelectCard>
-                );
-              })}
-            </div>
-          ) : (
-            <Alert tone="warning">
-              No models downloaded yet.{" "}
-              <Link href="/settings#models" className="font-medium text-ink underline">
-                Download one in Settings
-              </Link>
-              .
-            </Alert>
-          )}
-          {multiModel && modelsChosen.length === 0 && models.length > 0 && (
-            <p className="mt-3 text-xs text-critical-text">Pick at least one model.</p>
-          )}
-        </Section>
+        {byScenario ? (
+          <ScenariosEditor scenarios={scenarios} onChange={setScenarios} models={models} />
+        ) : (
+          <Section
+            title={multiModel ? "Models" : "Model"}
+            description={
+              multiModel
+                ? `Models downloaded on this machine, smallest first. Pick up to ${MAX_VARIANTS}: every one gets the same prompts, so the model is the only thing that changes.`
+                : "Models downloaded on this machine."
+            }
+            action={
+              <ButtonLink href="/settings#models" variant="secondary" size="sm">
+                Download more
+              </ButtonLink>
+            }
+          >
+            {models.length > 0 ? (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {models.map((m) => {
+                  const ref = modelRef(m);
+                  const picked = multiModel ? modelsChosen.includes(ref) : model === ref;
+                  const full = multiModel && !picked && modelsChosen.length >= MAX_VARIANTS;
+                  const color = multiModel && picked ? variantColor(modelsChosen.indexOf(ref)) : null;
+                  return (
+                    <SelectCard
+                      key={m.folder}
+                      role={multiModel ? "checkbox" : "radio"}
+                      selected={picked}
+                      onClick={() => (multiModel ? !full && toggleModel(ref) : setModel(ref))}
+                    >
+                      <div className={`flex items-center gap-2 pr-6 text-sm font-medium ${full ? "text-ink-3" : ""}`}>
+                        {color && <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />}
+                        <span className="truncate">{ref.split("/").pop()}</span>
+                      </div>
+                      <div className="mt-0.5 truncate text-xs text-ink-3">
+                        {m.model?.split("/")[0] ?? "local"} · {formatBytes(m.size_bytes)}
+                        {multiModel && m.gpu_memory_mb != null && ` · ~${gb(m.gpu_memory_mb)} GPU`}
+                      </div>
+                    </SelectCard>
+                  );
+                })}
+              </div>
+            ) : (
+              <Alert tone="warning">
+                No models downloaded yet.{" "}
+                <Link href="/settings#models" className="font-medium text-ink underline">
+                  Download one in Settings
+                </Link>
+                .
+              </Alert>
+            )}
+            {multiModel && modelsChosen.length === 0 && models.length > 0 && (
+              <p className="mt-3 text-xs text-critical-text">Pick at least one model.</p>
+            )}
+          </Section>
+        )}
 
         {experiment === "temperature-change" && (
           <Section
@@ -585,7 +603,7 @@ export function RunForm({ experiment }: { experiment: string }) {
               )}
               {tooSmall.length > 0 && needMb != null && (
                 <Alert tone="warning">
-                  The {multiModel && modelsChosen.length > 1 ? "largest model" : "model"} needs about {gb(needMb)}, more than GPU {tooSmall.map((g) => g.index).join(", ")} can hold on
+                  The {severalModels ? "largest model" : "model"} needs about {gb(needMb)}, more than GPU {tooSmall.map((g) => g.index).join(", ")} can hold on
                   its own.{" "}
                   {gpus.length > 1 ? (
                     <button type="button" onClick={() => setSplit(true)} className="font-medium text-ink underline">
@@ -636,7 +654,7 @@ export function RunForm({ experiment }: { experiment: string }) {
                 <p>
                   Needs about <span className="font-medium text-ink-2">{gb(perGpuNeed)}</span> of GPU memory
                   {gpuMode === "auto" ? " per worker" : " on each selected GPU"}
-                  {multiModel && modelsChosen.length > 1 && ", enough for the largest model"}
+                  {severalModels && ", enough for the largest model"}
                   {workerCount > 1 && needMb != null && (
                     <>
                       , <span className="font-medium text-ink-2">{gb(needMb * workerCount)}</span> in total
@@ -670,9 +688,13 @@ export function RunForm({ experiment }: { experiment: string }) {
           )}
         </Section>
 
-        {ownPrompts ? (
-          <CustomPromptsEditor onChange={setCustomPrompts} />
-        ) : (
+        {/* A Custom Experiment's editor stays mounted behind the library, so an edit it is still saving isn't lost */}
+        {(writesPrompts || byScenario) && (
+          <div className={ownPrompts ? undefined : "hidden"}>
+            <CustomPromptsEditor experiment={experiment} lead={promptSourceToggle} onChange={setCustomPrompts} />
+          </div>
+        )}
+        {!ownPrompts && (
           <Section
             title="Prompts"
             description="Click a category to toggle it. Hover a number to preview the prompt."
@@ -690,6 +712,7 @@ export function RunForm({ experiment }: { experiment: string }) {
               </div>
             }
           >
+            {promptSourceToggle}
             <div className="space-y-2.5">
               {categories.map(([name, items]) => {
                 const count = items.filter((p) => selected.has(p.number)).length;
@@ -750,7 +773,7 @@ export function RunForm({ experiment }: { experiment: string }) {
               />
             </Field>
           </div>
-          {!sweepsTemperature && defaultTemperature != null && (
+          {!setsTemperature && defaultTemperature != null && (
             <p className="mt-4 text-xs text-ink-3">
               The model samples at temperature <span className="font-medium text-ink-2">{defaultTemperature}</span>
               {defaultTemperature === 0 && " (greedy decoding)"}, the default set in{" "}
@@ -780,7 +803,8 @@ export function RunForm({ experiment }: { experiment: string }) {
           </div>
           <dl className="divide-y divide-[var(--hairline)] px-5 text-sm">
             {[
-              [multiModel ? "Models" : "Model", modelText],
+              [multiModel || severalModels ? "Models" : "Model", modelText],
+              ...(byScenario ? [["Scenarios", `${scenarios.length}`]] : []),
               ...(experiment === "temperature-change"
                 ? [["Temperatures", temperatures.length ? temperatures.join(", ") : "—"]]
                 : experiment === "delay"
@@ -796,7 +820,7 @@ export function RunForm({ experiment }: { experiment: string }) {
                   : `${selected.size} from ${selectedCategories} categor${selectedCategories === 1 ? "y" : "ies"}`,
               ],
               ["Repeat", repeat > 1 ? `× ${repeat}` : "Once"],
-              ...(!sweepsTemperature && defaultTemperature != null ? [["Temperature", `${defaultTemperature}`]] : []),
+              ...(!setsTemperature && defaultTemperature != null ? [["Temperature", `${defaultTemperature}`]] : []),
               ["Max tokens", maxTokens.toLocaleString()],
             ].map(([k, v]) => (
               <div key={k} className="flex justify-between gap-3 py-2.5">
@@ -812,11 +836,13 @@ export function RunForm({ experiment }: { experiment: string }) {
                 maxLength={60}
                 onChange={(e) => setName(e.target.value)}
                 placeholder={
-                  multiModel
-                    ? "e.g. 7B models"
-                    : model
-                      ? `${shortName(model)} ${sweepsTemperature ? "temperature sweep" : experiment === "delay" ? "under delay" : ownPrompts ? "crafted prompts" : "baseline"}`
-                      : "e.g. Qwen baseline"
+                  byScenario
+                    ? "e.g. 7B models under delay"
+                    : multiModel
+                      ? "e.g. 7B models"
+                      : model
+                        ? `${shortName(model)} ${sweepsTemperature ? "temperature sweep" : experiment === "delay" ? "under delay" : ownPrompts ? "crafted prompts" : "baseline"}`
+                        : "e.g. Qwen baseline"
                 }
                 className={inputClass}
               />

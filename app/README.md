@@ -17,6 +17,7 @@ app/                              # project root
 │       ├── temperature_change.py # 3, ported from ../3-Temperature-change
 │       ├── scalability.py        # 5, ported from ../5-Scalability
 │       ├── delay.py              # 6, ported from ../6-Delay
+│       ├── custom_experiment.py  # not in the repo: scenarios with every setting of the others
 │       ├── engine.py             # runs, workers, the shared queue + Docker cleanup
 │       ├── scheduler.py          # which GPU a run's workers go to, and when
 │       ├── analysis.py           # PCAP parsing and run analytics
@@ -54,13 +55,13 @@ Open http://localhost:3000. API docs: http://localhost:3000/api/docs.
 
 ## Using it
 
-The sidebar lists the five experiments: Data Collector, Temperature Change, Custom Prompts, Scalability and Delay.
+The sidebar lists six experiments: the five from the repo (Data Collector, Temperature Change, Custom Prompts, Scalability and Delay) and the Custom Experiment, which you set up yourself.
 
 | Page | What it's for |
 | --- | --- |
 | **Overview** (`/`) | Totals, the runs in progress, host status (Docker, GPU memory), recent runs of every experiment |
 | **_Experiment_ › Runs** | Every run of that experiment, newest first |
-| **_Experiment_ › New run** | Pick a downloaded model (several on Scalability), what the experiment compares (see below), the hardware (Auto, chosen GPUs, or CPU), the number of workers, prompts, repeats and max tokens |
+| **_Experiment_ › New run** | Pick a downloaded model (several on Scalability, one per scenario on the Custom Experiment), what the experiment compares (see below), the hardware (Auto, chosen GPUs, or CPU), the number of workers, prompts, repeats and max tokens |
 | **Run page** | *Monitor*: queue position, live progress, what each worker is doing, log, Cancel. *Results*: the run's analytics, and every capture with its packets on the wire, prompt, response and a PCAP download. *Export files* downloads the whole run as a zip, *Metrics CSV* one row per capture (with the worker and GPU that made it). Finished runs can be deleted here or from the runs list |
 | **Prompts** | The prompt library: the 60 built-in prompts plus your own, in your own categories. Add prompts here or from *New run*. Custom Prompts doesn't use it |
 | **Settings** | Theme (light / dark / system) and accent color, the default sampling temperature, the results folder, HuggingFace token, model downloads and deletion |
@@ -69,7 +70,7 @@ Every run gets a number (#1, #2, …) shown as a colored badge. Numbers are shar
 
 ### The experiments
 
-All five run the same capture: a fresh inference container per prompt, a tcpdump sidecar, and a client on an isolated network. Data Collector and Custom Prompts capture every prompt once. The other three compare several settings in one run (up to 8, one chart color each) and capture every prompt once per setting.
+All six run the same capture: a fresh inference container per prompt, a tcpdump sidecar, and a client on an isolated network. Data Collector and Custom Prompts capture every prompt once. The other four compare several settings in one run (up to 8, one chart color each) and capture every prompt once per setting.
 
 | Experiment | A run compares | Defaults (from the original scripts) |
 | --- | --- | --- |
@@ -78,12 +79,13 @@ All five run the same capture: a fresh inference container per prompt, a tcpdump
 | **Temperature Change** | sampling temperatures, 0 to 2, on one model. The original edited `TEMPERATURE` in `inference_server.py` between runs; here the server gets `--temperature`. 0 is greedy decoding | all prompts, once, at 0.3, 0.7 and 0.9 |
 | **Scalability** | models, smallest first. The original ran one model per invocation. GPU memory is reserved for the largest | the 10 Code Generation prompts, 10 times each |
 | **Delay** | network conditions: a delay, a jitter and its distribution (`normal`, `pareto`, `paretonormal`). Before each capture, `tc qdisc add dev eth0 root netem delay …` runs from a netshoot sidecar in the inference container's network, as in `6-Delay/main.py`. It delays everything the server sends, so both the PCAP and the client's timing show it | the 10 Logical Reasoning prompts, 10 times each, with no delay and with 500 ms ± 50 ms |
+| **Custom Experiment** | scenarios. It is not one of the repo's scripts: each scenario has its own model, sampling temperature and network condition (delay, jitter and distribution, applied as in Delay), so a run can repeat any of the other experiments, cross them (two models under a delay, a temperature sweep on each), or be one scenario with everything set by hand. A scenario can be given a label; otherwise the results name it by what sets it apart from the others (`Temperature 0.3`, or `Qwen2.5-7B-Instruct · T 0.3 · 500 ms` when several things differ). Its prompts come from the prompt library, or are written in its *New run* form and sent exactly as written, as in Custom Prompts (saved in `data/custom-experiment-prompts.json`) | one scenario: the first model, the default temperature, no delay. All prompts, once |
 
-**Sampling temperature.** Data Collector, Custom Prompts, Scalability and Delay sample at the default temperature in Settings → Sampling (0.7 unless changed, as in the original scripts; 0 is greedy decoding). A run records the temperature it started with, so changing the setting only affects new runs. Temperature Change sets its own temperatures and ignores it. In every case only the temperature is set: the model's own `generation_config.json` (top_p, top_k, repetition penalty) still applies, as in the original scripts.
+**Sampling temperature.** Data Collector, Custom Prompts, Scalability and Delay sample at the default temperature in Settings → Sampling (0.7 unless changed, as in the original scripts; 0 is greedy decoding). A run records the temperature it started with, so changing the setting only affects new runs. Temperature Change sets its own temperatures and ignores it. In a Custom Experiment every scenario has its own temperature, which starts at the default. In every case only the temperature is set: the model's own `generation_config.json` (top_p, top_k, repetition penalty) still applies, as in the original scripts.
 
-The captures of a prompt's settings run one after the other (prompt 1 at every temperature, then prompt 2, …), so every setting sees the same conditions over the run and a cancelled run still has all of them. On the results page, the **By temperature / model / network condition** tile compares them metric by metric, and every chart has one series per setting.
+The captures of a prompt's settings run one after the other (prompt 1 at every temperature, then prompt 2, …), so every setting sees the same conditions over the run and a cancelled run still has all of them. On the results page, the **By temperature / model / network condition / scenario** tile compares them metric by metric, and every chart has one series per setting.
 
-The Delay experiment needs the host kernel's `sch_netem` module (`sudo modprobe sch_netem`). If `tc` fails, the run stops with that hint instead of capturing without the delay. Jitter needs a delay, and a distribution only applies with jitter (iproute2 rejects it otherwise).
+The Delay experiment, and a Custom Experiment scenario with a delay, need the host kernel's `sch_netem` module (`sudo modprobe sch_netem`). If `tc` fails, the run stops with that hint instead of capturing without the delay. Jitter needs a delay, and a distribution only applies with jitter (iproute2 rejects it otherwise).
 
 Runs are saved in the results folder (`data/` by default, changeable in Settings), so the history survives restarts; a run that was active when the API stopped shows as *interrupted*.
 
@@ -109,7 +111,7 @@ Each capture is parsed from its PCAP (no Wireshark needed) plus the client's per
 | Packet size | TCP payload of each stream packet |
 | Packets | Stream packets carrying data |
 
-Results are cached per capture in `analysis/` next to the PCAPs and rebuilt if a PCAP changes. The metrics CSV has one row per capture, with the setting it was captured with (`temperature`, `model`, or `delay_ms`, `jitter_ms`, `distribution`).
+Results are cached per capture in `analysis/` next to the PCAPs and rebuilt if a PCAP changes. The metrics CSV has one row per capture, with the setting it was captured with (`temperature`, `model`, or `delay_ms`, `jitter_ms`, `distribution`; all of them and `scenario`, its label, for a Custom Experiment).
 
 ## Docker cleanup
 
@@ -124,11 +126,11 @@ Nothing without that label is touched. If the API process dies mid-run, the next
 
 ## Outputs
 
-`<experiment>` is `data-collector`, `temperature-change`, `custom-prompts`, `scalability` or `delay`.
+`<experiment>` is `data-collector`, `temperature-change`, `custom-prompts`, `scalability`, `delay` or `custom-experiment`.
 
 | Path                                   | Contents                                               |
 | -------------------------------------- | ------------------------------------------------------ |
-| `data/<experiment>/<run id>/captures` | PCAP per capture: `<model>-pNN.pcap` as in the original scripts, `<model>-t0.7-pNN.pcap` for a temperature, `<model>-d500ms-j50ms-normal-pNN.pcap` for a network condition |
+| `data/<experiment>/<run id>/captures` | PCAP per capture: `<model>-pNN.pcap` as in the original scripts, `<model>-t0.7-pNN.pcap` for a temperature, `<model>-d500ms-j50ms-normal-pNN.pcap` for a network condition, `<model>-t0.7-d500ms-j50ms-normal-pNN.pcap` for a scenario (`-d0ms` without a delay) |
 | `data/<experiment>/<run id>/results`  | client output per capture: response + per-event timing, its setting, and the worker and GPUs that ran it |
 | `data/<experiment>/<run id>/logs`     | prompt text, model response and server logs            |
 | `data/<experiment>/<run id>/analysis` | cached analytics per capture                           |
@@ -137,6 +139,7 @@ Nothing without that label is touched. If the API process dies mid-run, the next
 | `data/<experiment>/<run id>/run.log`  | the run's full log                                     |
 | `data/prompts.json`                    | your prompts (numbered from 61; numbers are never reused) |
 | `data/custom-prompts.json`             | the Custom Prompts experiment's saved prompts (the crafted ones until you change them) |
+| `data/custom-experiment-prompts.json`  | the Custom Experiment's written prompts (none until you write some) |
 | `data/settings.json`                   | saved settings: results folder, default temperature, HF token (owner-only) |
 | `models/<org>-<name>`                  | downloaded models                                      |
 

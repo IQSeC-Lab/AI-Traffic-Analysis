@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { X } from "lucide-react";
 
 import { api, type CustomPrompts } from "@/lib/api";
@@ -11,36 +11,46 @@ import { Section } from "./FormSection";
 const sameList = (a: string[], b: string[]) => a.length === b.length && a.every((text, i) => text === b[i]);
 
 /**
- * The Custom Prompts experiment's own prompts: loaded from and saved to the experiment,
- * never the prompt library. Reports the current list (null while loading) to the form.
+ * An experiment's own prompts (Custom Prompts, or the Custom Experiment when its prompts are
+ * written): loaded from and saved to the experiment, never the prompt library. Reports the
+ * current list (null while loading) to the form. `lead` goes above the prompts.
  */
-export function CustomPromptsEditor({ onChange }: { onChange: (prompts: string[] | null) => void }) {
+export function CustomPromptsEditor({
+  experiment,
+  lead,
+  onChange,
+}: {
+  experiment: string;
+  lead?: ReactNode;
+  onChange: (prompts: string[] | null) => void;
+}) {
   const [data, setData] = useState<CustomPrompts | null>(null);
   const [prompts, setPrompts] = useState<string[]>([]);
   const [revision, setRevision] = useState(0); // edits since loading; each one is saved shortly after
   const [save, setSave] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const [error, setError] = useState<string | null>(null);
   const [confirm, dialog] = useConfirm();
+  const url = `/${experiment}/prompts`;
 
   useEffect(() => {
-    api<CustomPrompts>("/custom-prompts/prompts")
+    api<CustomPrompts>(url)
       .then((d) => {
         setData(d);
         setPrompts(d.prompts);
         onChange(d.prompts);
       })
       .catch((e: Error) => setError(e.message));
-  }, [onChange]);
+  }, [url, onChange]);
 
   useEffect(() => {
     if (revision === 0) return;
     const timer = setTimeout(() => {
-      api("/custom-prompts/prompts", { method: "PUT", body: JSON.stringify({ prompts }) })
+      api(url, { method: "PUT", body: JSON.stringify({ prompts }) })
         .then(() => setSave("saved"))
         .catch(() => setSave("failed"));
     }, 700);
     return () => clearTimeout(timer);
-  }, [revision, prompts]);
+  }, [url, revision, prompts]);
 
   function update(next: string[]) {
     setPrompts(next);
@@ -80,6 +90,7 @@ export function CustomPromptsEditor({ onChange }: { onChange: (prompts: string[]
         </div>
       }
     >
+      {lead}
       {error && <Alert>{error}</Alert>}
       {!data && !error && <Loading label="Loading prompts…" />}
       {data && (

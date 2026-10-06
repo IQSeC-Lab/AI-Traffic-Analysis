@@ -4,14 +4,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 
 import { api, type Analytics, type Capture, type CaptureMetrics, type Run } from "@/lib/api";
-import { EXPERIMENTS } from "@/lib/experiments";
+import { EXPERIMENTS, hasOwnPrompts } from "@/lib/experiments";
 import { formatBytes, formatMs, formatNumber } from "@/lib/format";
 import { useInterval } from "@/lib/useInterval";
 import { Alert, Loading, StatTile, buttonClass } from "@/components/ui";
 import type { Series } from "@/components/charts/scale";
 import { CategoryChart, CompareChart, GapChart, SizeChart } from "./AnalyticsCharts";
 import { CaptureDrawer } from "./CaptureDrawer";
-import { comparesText, modelName, variantColor, variantLabel } from "./RunBadge";
+import { comparesText, modelName, runTemperature, variantColor, variantLabel } from "./RunBadge";
 
 type SortKey = "index" | "worker" | "variant" | keyof CaptureMetrics;
 
@@ -64,10 +64,9 @@ export function RunResults({ run, live }: { run: Run; live: boolean }) {
   const [shown, setShown] = useState(PAGE);
   const [open, setOpen] = useState<string | null>(null);
   const base = `/${run.experiment}/runs/${run.id}`;
-  // What the run compares (temperature, model, network condition); the Data Collector compares nothing
-  const info = EXPERIMENTS.find((e) => e.slug === run.experiment);
-  const variable = info?.variable;
-  const byPrompt = info?.ownPrompts ?? false; // Custom Prompts: each prompt is its own category
+  // What the run compares (temperature, model, network condition, scenario); the Data Collector compares nothing
+  const variable = EXPERIMENTS.find((e) => e.slug === run.experiment)?.variable;
+  const byPrompt = hasOwnPrompts(run); // prompts written for the run: each is its own category
   const variantOrder = useMemo(() => new Map(run.variants.map((v, i) => [v.key, i])), [run.variants]);
 
   const refresh = useCallback(() => {
@@ -107,15 +106,14 @@ export function RunResults({ run, live }: { run: Run; live: boolean }) {
     : data.groups.map((g) => ({ id: g.key, label: g.label, color: "var(--accent)" }));
   const variantOf = new Map(run.variants.map((v, i) => [v.key, { label: variantLabel(run.experiment, v), color: variantColor(i) }]));
   const compares = comparesText(run);
+  const temperature = runTemperature(run);
   const heroFacts: [string, string][] = [
     ["Traffic captured", formatBytes(s.total_bytes)],
     ["Response", s.median_response_chars != null ? `${formatNumber(s.median_response_chars, 0)} chars` : "—"],
     ["Generation", s.median_duration_s != null ? `${formatNumber(s.median_duration_s)} s` : "—"],
     ["Stream packets", formatNumber(s.median_stream_packets, 0)],
-    // One temperature for the whole run, unless it sweeps them. Runs from before it was recorded sampled at 0.7
-    ...(run.experiment !== "temperature-change"
-      ? [["Temperature", `${run.variants[0]?.temperature ?? 0.7}`] as [string, string]]
-      : []),
+    // One temperature for the whole run, unless it compares several
+    ...(temperature != null ? [["Temperature", `${temperature}`] as [string, string]] : []),
     ...(byWorker
       ? [["Workers", `${workers.length} · ${gpuText([...new Set(workers.flatMap((w) => w.gpus ?? []))].sort((a, b) => a - b))}`] as [string, string]]
       : []),
@@ -219,7 +217,7 @@ export function RunResults({ run, live }: { run: Run; live: boolean }) {
                   </td>
                   {variable && (
                     <td className="px-3 py-2 whitespace-nowrap">
-                      <span className="flex max-w-56 items-center gap-2">
+                      <span className="flex max-w-72 items-center gap-2" title={variantOf.get(c.variant)?.label}>
                         <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: variantOf.get(c.variant)?.color }} />
                         <span className="truncate">{variantOf.get(c.variant)?.label ?? c.variant}</span>
                       </span>

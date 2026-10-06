@@ -103,7 +103,8 @@ export function SamplingCard() {
           <Link href={experimentHref("temperature-change")} className="font-medium text-ink-2 underline">
             Temperature Change
           </Link>{" "}
-          runs set their own temperatures and ignore this.
+          runs set their own temperatures and ignore this. In a Custom Experiment, each scenario starts at it and can
+          be changed.
         </p>
       </div>
     </Card>

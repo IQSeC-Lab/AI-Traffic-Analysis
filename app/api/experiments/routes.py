@@ -1,8 +1,8 @@
 """
 HTTP endpoints of the capture experiments: the same set under /api/<slug> for each
 experiment (/api/data-collector, /api/temperature-change, ...), plus
-/api/experiments for the runs of all of them. Custom Prompts adds its saved
-prompts (custom_prompts.router).
+/api/experiments for the runs of all of them. Custom Prompts and the Custom
+Experiment add their saved prompts (custom_prompts.router, custom_experiment.router).
 """
 
 # No `from __future__ import annotations` here: make_router's endpoints annotate their
@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from . import analysis, custom_prompts, engine, export
+from . import analysis, custom_experiment, custom_prompts, engine, export
 from .base import NAME_MAX, Kind
 from .kinds import KINDS
 
@@ -121,7 +121,7 @@ def make_router(kind: Kind) -> APIRouter:
     @router.get("/runs/{run_id}/analytics")
     def run_analytics(run_id: str) -> dict:
         """The run's summary, and its summaries and distributions per variant (temperature,
-        model, network condition; a single group for the Data Collector), on shared bins."""
+        model, network condition, scenario; a single group for the Data Collector), on shared bins."""
         aggregate = _aggregate(_get_run(run_id))
         groups = [(g["key"], g["label"], g) for g in aggregate["groups"]]
         return {"summary": aggregate["summary"], **_analytics(groups)}
@@ -189,4 +189,5 @@ def all_active_runs() -> list[dict]:
     return [run.summary() for run in engine.active_runs()]
 
 
-routers = [all_router, *(make_router(kind) for kind in KINDS.values()), custom_prompts.router]
+routers = [all_router, *(make_router(kind) for kind in KINDS.values()),
+           custom_prompts.router, custom_experiment.router]

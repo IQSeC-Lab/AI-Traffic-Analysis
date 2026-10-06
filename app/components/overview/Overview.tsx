@@ -166,7 +166,7 @@ export function Overview() {
         </Card>
       </div>
 
-      <Card title="Experiments" description="The five MaLLM experiments." padded={false}>
+      <Card title="Experiments" description="The five MaLLM experiments, and one you set up yourself." padded={false}>
         <ul className="divide-y divide-[var(--hairline)] border-t border-hairline">
           {EXPERIMENTS.map(({ slug, name, summary, description, available }) => {
             const body = (
