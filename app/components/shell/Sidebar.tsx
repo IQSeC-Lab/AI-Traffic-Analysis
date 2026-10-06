@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Cpu, LayoutDashboard, Menu, MessagesSquare, Radar, Settings, X } from "lucide-react";
 
 import { api, type Run, type SystemInfo } from "@/lib/api";
-import { EXPERIMENTS, ORCHESTRATOR_EXPERIMENTS, experimentHref, runHref } from "@/lib/experiments";
+import { EXPERIMENTS, AGENTIC_EXPERIMENTS, experimentHref, runHref } from "@/lib/experiments";
 import { useInterval } from "@/lib/useInterval";
 import { LiveDot } from "@/components/ui";
 import { RunBadge, runTitle } from "@/components/experiments/RunBadge";
@@ -108,8 +108,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       </nav>
 
       <nav className="space-y-0.5">
-        <div className="px-2.5 pb-1.5 text-[11px] font-medium tracking-wide text-ink-3 uppercase">Agentic Orchestrator</div>
-        {ORCHESTRATOR_EXPERIMENTS.map((e) => (
+        <div className="px-2.5 pb-1.5 text-[11px] font-medium tracking-wide text-ink-3 uppercase">Agentic AI</div>
+        {AGENTIC_EXPERIMENTS.map((e) => (
           <NavItem
             key={e.slug}
             href={experimentHref(e.slug)}

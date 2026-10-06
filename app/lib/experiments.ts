@@ -1,6 +1,5 @@
 import {
   ChartBarDecreasing,
-  Grid3x3,
   Layers,
   PenLine,
   Radar,
@@ -101,16 +100,17 @@ export const EXPERIMENTS: ExperimentInfo[] = [
   },
 ];
 
-// The agentic orchestrator experiments (MARBLE, graph and star topologies). Not in the app yet, so they are
-// kept out of EXPERIMENTS: they have no runs, forms or pages.
-export const ORCHESTRATOR_EXPERIMENTS: ExperimentInfo[] = [
+// The agentic AI experiments (MARBLE: several agents in a graph or star topology calling one LLM server).
+// Not in the app yet, so they are kept out of EXPERIMENTS: they have no runs, forms or pages.
+// The ten-category traffic heatmap is not one of them, it belongs in the Results of an agentic run.
+export const AGENTIC_EXPERIMENTS: ExperimentInfo[] = [
   {
-    slug: "traffic-heatmap",
-    name: "Traffic Heatmap",
-    summary: "Traffic by task category",
+    slug: "topology-transfer",
+    name: "Topology Transfer",
+    summary: "Across topologies and visible agents",
     description:
-      "Six payload-independent traffic measurements per MARBLE execution, aggregated by task and compared across the ten task categories.",
-    icon: Grid3x3,
+      "Task fingerprinting within one topology and from graph to star, and how accuracy changes with the number of agents whose traffic is observed.",
+    icon: Waypoints,
     available: false,
   },
   {
@@ -120,15 +120,6 @@ export const ORCHESTRATOR_EXPERIMENTS: ExperimentInfo[] = [
     description:
       "Which of the 247 traffic features identify a task. Random Forests are trained per topology over five task-grouped folds, and the ten most important features are ranked for graph and star.",
     icon: ChartBarDecreasing,
-    available: false,
-  },
-  {
-    slug: "topology-transfer",
-    name: "Topology Transfer",
-    summary: "Across topologies and visible agents",
-    description:
-      "Task fingerprinting within one topology and from graph to star, and how accuracy changes with the number of agents whose traffic is observed.",
-    icon: Waypoints,
     available: false,
   },
 ];
