@@ -1,4 +1,15 @@
-import { Layers, PenLine, Radar, SlidersHorizontal, Thermometer, Timer, type LucideIcon } from "lucide-react";
+import {
+  ChartBarDecreasing,
+  Grid3x3,
+  Layers,
+  PenLine,
+  Radar,
+  SlidersHorizontal,
+  Thermometer,
+  Timer,
+  Waypoints,
+  type LucideIcon,
+} from "lucide-react";
 
 export type ExperimentInfo = {
   slug: string;
@@ -87,6 +98,38 @@ export const EXPERIMENTS: ExperimentInfo[] = [
     available: true,
     variable: { one: "scenario", many: "scenarios" },
     scenarios: true,
+  },
+];
+
+// The agentic orchestrator experiments (MARBLE, graph and star topologies). Not in the app yet, so they are
+// kept out of EXPERIMENTS: they have no runs, forms or pages.
+export const ORCHESTRATOR_EXPERIMENTS: ExperimentInfo[] = [
+  {
+    slug: "traffic-heatmap",
+    name: "Traffic Heatmap",
+    summary: "Traffic by task category",
+    description:
+      "Six payload-independent traffic measurements per MARBLE execution, aggregated by task and compared across the ten task categories.",
+    icon: Grid3x3,
+    available: false,
+  },
+  {
+    slug: "feature-importance",
+    name: "Feature Importance",
+    summary: "Top 10 Random Forest features",
+    description:
+      "Which of the 247 traffic features identify a task. Random Forests are trained per topology over five task-grouped folds, and the ten most important features are ranked for graph and star.",
+    icon: ChartBarDecreasing,
+    available: false,
+  },
+  {
+    slug: "topology-transfer",
+    name: "Topology Transfer",
+    summary: "Across topologies and visible agents",
+    description:
+      "Task fingerprinting within one topology and from graph to star, and how accuracy changes with the number of agents whose traffic is observed.",
+    icon: Waypoints,
+    available: false,
   },
 ];
 

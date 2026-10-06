@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Cpu, LayoutDashboard, Menu, MessagesSquare, Radar, Settings, X } from "lucide-react";
 
 import { api, type Run, type SystemInfo } from "@/lib/api";
-import { EXPERIMENTS, experimentHref, runHref } from "@/lib/experiments";
+import { EXPERIMENTS, ORCHESTRATOR_EXPERIMENTS, experimentHref, runHref } from "@/lib/experiments";
 import { useInterval } from "@/lib/useInterval";
 import { LiveDot } from "@/components/ui";
 import { RunBadge, runTitle } from "@/components/experiments/RunBadge";
@@ -67,7 +67,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   }, []);
 
   return (
-    <div className="flex h-full flex-col gap-6 px-3 py-4" onClick={(e) => (e.target as HTMLElement).closest("a") && onNavigate?.()}>
+    <div className="flex min-h-full flex-col gap-6 px-3 py-4" onClick={(e) => (e.target as HTMLElement).closest("a") && onNavigate?.()}>
       <Link href="/" className="flex items-center gap-2.5 px-2">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent-strong text-white">
           <Radar className="h-4.5 w-4.5" strokeWidth={2} />
@@ -83,7 +83,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       </nav>
 
       <nav className="space-y-0.5">
-        <div className="px-2.5 pb-1.5 text-[11px] font-medium tracking-wide text-ink-3 uppercase">Experiments</div>
+        <div className="px-2.5 pb-1.5 text-[11px] font-medium tracking-wide text-ink-3 uppercase">Client to Server</div>
         {EXPERIMENTS.map((e) => {
           const href = experimentHref(e.slug);
           const running = active.some((r) => r.experiment === e.slug && r.status !== "queued");
@@ -105,6 +105,23 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
             />
           );
         })}
+      </nav>
+
+      <nav className="space-y-0.5">
+        <div className="px-2.5 pb-1.5 text-[11px] font-medium tracking-wide text-ink-3 uppercase">Agentic Orchestrator</div>
+        {ORCHESTRATOR_EXPERIMENTS.map((e) => (
+          <NavItem
+            key={e.slug}
+            href={experimentHref(e.slug)}
+            icon={e.icon}
+            label={e.name}
+            active={false}
+            disabled={!e.available}
+            trailing={
+              !e.available && <span className="rounded-md bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium text-ink-3">Soon</span>
+            }
+          />
+        ))}
       </nav>
 
       <nav className="space-y-0.5">
@@ -176,7 +193,7 @@ export function Sidebar() {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <aside className="sticky top-0 hidden h-screen w-64 shrink-0 border-r border-hairline bg-page lg:block">
+      <aside className="sticky top-0 hidden h-screen w-64 shrink-0 overflow-y-auto border-r border-hairline bg-page lg:block">
         <SidebarContent />
       </aside>
 
@@ -192,7 +209,7 @@ export function Sidebar() {
       {open && (
         <div className="fixed inset-0 z-40 lg:hidden">
           <div className="absolute inset-0 bg-black/30" onClick={() => setOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 w-72 border-r border-hairline bg-page shadow-xl">
+          <aside className="absolute inset-y-0 left-0 w-72 overflow-y-auto border-r border-hairline bg-page shadow-xl">
             <button
               type="button"
               onClick={() => setOpen(false)}
