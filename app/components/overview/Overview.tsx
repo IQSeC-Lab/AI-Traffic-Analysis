@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
 import { api, isActive, type ModelsResponse, type Run, type SystemInfo } from "@/lib/api";
-import { EXPERIMENTS, experimentHref, experimentName, runHref } from "@/lib/experiments";
+import { AGENTIC_EXPERIMENTS, CLIENT_EXPERIMENTS, experimentHref, experimentName, runHref } from "@/lib/experiments";
 import { formatBytes, timeAgo } from "@/lib/format";
 import { useInterval } from "@/lib/useInterval";
 import { ButtonLink, Card, LiveDot, ProgressBar, StatTile, StatusPill } from "@/components/ui";
@@ -166,35 +166,42 @@ export function Overview() {
         </Card>
       </div>
 
-      <Card title="Experiments" description="The five RogueAgent experiments, and one you set up yourself." padded={false}>
-        <ul className="divide-y divide-[var(--hairline)] border-t border-hairline">
-          {EXPERIMENTS.map(({ slug, name, summary, description, available }) => {
-            const body = (
-              <>
-                <div className="w-48 shrink-0">
-                  <div className="text-sm font-medium">{name}</div>
-                  <div className="text-xs text-ink-3">{summary}</div>
-                </div>
-                <p className="min-w-0 flex-1 text-sm text-ink-2">{description}</p>
-                <span className={`w-24 shrink-0 text-right text-xs ${available ? "font-medium text-accent" : "text-ink-3"}`}>
-                  {available ? "Open" : "Not yet"}
-                </span>
-              </>
-            );
-            return (
-              <li key={slug}>
-                {available ? (
-                  <Link href={experimentHref(slug)} className="flex items-start gap-6 px-5 py-3.5 hover:bg-surface-2/60">
-                    {body}
-                  </Link>
-                ) : (
-                  <div className="flex items-start gap-6 px-5 py-3.5">{body}</div>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      </Card>
+      {(
+        [
+          ["Client to Server", "One prompt and its streamed response: the five RogueAgent experiments, and one you set up yourself.", CLIENT_EXPERIMENTS],
+          ["Agentic AI", "Several agents working on a task through one LLM server.", AGENTIC_EXPERIMENTS],
+        ] as const
+      ).map(([title, text, experiments]) => (
+        <Card key={title} title={title} description={text} padded={false}>
+          <ul className="divide-y divide-[var(--hairline)] border-t border-hairline">
+            {experiments.map(({ slug, name, summary, description, available }) => {
+              const body = (
+                <>
+                  <div className="w-48 shrink-0">
+                    <div className="text-sm font-medium">{name}</div>
+                    <div className="text-xs text-ink-3">{summary}</div>
+                  </div>
+                  <p className="min-w-0 flex-1 text-sm text-ink-2">{description}</p>
+                  <span className={`w-24 shrink-0 text-right text-xs ${available ? "font-medium text-accent" : "text-ink-3"}`}>
+                    {available ? "Open" : "Not yet"}
+                  </span>
+                </>
+              );
+              return (
+                <li key={slug}>
+                  {available ? (
+                    <Link href={experimentHref(slug)} className="flex items-start gap-6 px-5 py-3.5 hover:bg-surface-2/60">
+                      {body}
+                    </Link>
+                  ) : (
+                    <div className="flex items-start gap-6 px-5 py-3.5">{body}</div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
+      ))}
     </div>
   );
 }

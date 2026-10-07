@@ -6,11 +6,12 @@ import { useCallback, useEffect, useState } from "react";
 import { Pencil } from "lucide-react";
 
 import { ApiError, api, isActive, type Run } from "@/lib/api";
-import { experimentHref, experimentName } from "@/lib/experiments";
+import { experimentHref, experimentName, isAgentic } from "@/lib/experiments";
 import { useInterval } from "@/lib/useInterval";
 import { Alert, Loading, StatusPill, buttonClass } from "@/components/ui";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { formatBytes, hardwareLabel } from "@/lib/format";
+import { AgenticResults } from "./AgenticResults";
 import { RunMonitor } from "./RunMonitor";
 import { RunResults } from "./RunResults";
 import { RunBadge, comparesText, runTemperature, runTitle } from "./RunBadge";
@@ -94,13 +95,16 @@ export function RunPage({ experiment, id, initialTab }: { experiment: string; id
   // Finished runs open on their results; live runs on the monitor.
   const current: Tab = tab ?? (active || run.outputs.pcaps === 0 ? "monitor" : "results");
   const prompts = run.prompt_count ?? run.config.prompts?.length ?? 60;
+  const agentic = isAgentic(experiment);
+  const unit = agentic ? "task" : "prompt";
   const compares = comparesText(run);
   const temperature = runTemperature(run);
   const meta = [
     ...(compares ? [compares] : []),
     hardwareLabel(run),
     ...(temperature != null ? [`temperature ${temperature}`] : []),
-    `${prompts} prompt${prompts === 1 ? "" : "s"}`,
+    ...(run.config.provider === "ollama" ? ["Ollama"] : []),
+    `${prompts} ${unit}${prompts === 1 ? "" : "s"}`,
     ...(run.config.repeat ? [`× ${run.config.repeat}`] : []),
     ...((run.config.workers ?? 1) > 1 ? [`${run.config.workers} workers`] : []),
   ];
@@ -137,7 +141,7 @@ export function RunPage({ experiment, id, initialTab }: { experiment: string; id
         <div className="flex flex-wrap items-center gap-2">
           {run.outputs.pcaps > 0 && (
             <>
-              <a href={`/api/${experiment}/runs/${run.id}/export.zip`} className={buttonClass("secondary")} title="PCAPs, client results, logs and run.json">
+              <a href={`/api/${experiment}/runs/${run.id}/export.zip`} className={buttonClass("secondary")} title={agentic ? "PCAPs, each agent's calls, task configs, logs and run.json" : "PCAPs, client results, logs and run.json"}>
                 Export files
               </a>
               <a href={`/api/${experiment}/runs/${run.id}/captures.csv`} className={buttonClass("secondary")} title="One row per capture with its settings and metrics">
@@ -185,7 +189,13 @@ export function RunPage({ experiment, id, initialTab }: { experiment: string; id
         ))}
       </div>
 
-      {current === "monitor" ? <RunMonitor run={run} now={now} /> : <RunResults run={run} live={active} />}
+      {current === "monitor" ? (
+        <RunMonitor run={run} now={now} />
+      ) : agentic ? (
+        <AgenticResults run={run} live={active} />
+      ) : (
+        <RunResults run={run} live={active} />
+      )}
       {dialog}
     </div>
   );

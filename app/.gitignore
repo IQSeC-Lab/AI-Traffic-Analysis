@@ -47,3 +47,4 @@ __pycache__/
 # experiment outputs, settings (holds the HF token) and downloaded models
 /data/
 /models/
+/ollama_models/

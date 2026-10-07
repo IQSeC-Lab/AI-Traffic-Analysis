@@ -29,6 +29,8 @@
   --series-6: #008300;
   --series-7: #4a3aa7;
   --series-8: #e34948;
+  /* Diverging scales run from --series-1 (below) to --series-8 (above) through this neutral midpoint */
+  --diverge-mid: #f0efec;
 
   --good: #0ca30c;
   --warning: #fab219;
@@ -72,6 +74,8 @@
   --hairline: #2c2c2a;
   --axis: #383835;
   --border: rgba(255, 255, 255, 0.1);
+
+  --diverge-mid: #383835;
 
   --accent: #9085e9;
   --accent-strong: #5a4ac4;

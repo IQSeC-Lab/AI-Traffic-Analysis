@@ -1,0 +1,32 @@
+# The MARBLE agents of the agentic experiments. The build context is the marble/ folder
+# beside this file (MALLM_MARBLE_DIR), not this folder.
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    openssl \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY requirements.txt ./
+# MARBLE only calls the model server, so torch (a dependency of its research tools) is the CPU
+# build: about 2 GB smaller than the default one with its CUDA libraries. If the CPU index
+# doesn't have the pinned version, the next step installs the default build instead.
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu \
+      "$(grep -i '^torch==' requirements.txt)" || true
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY marble ./marble
+COPY data ./data
+COPY scripts ./scripts
+# The self-signed certificate of the TLS proxy in front of Ollama (certs/cert.pem, certs/key.pem),
+# and the folders MARBLE writes its log and results to, relative to marble/.
+RUN bash scripts/generate_certs.sh && mkdir -p marble/logs marble/result
+
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+# litellm otherwise fetches its price list from GitHub when imported, and the run's network has no internet
+ENV LITELLM_LOCAL_MODEL_COST_MAP=True
+ENV HF_HUB_OFFLINE=1
+# marble/main.py reads ../data and writes logs/ and result/ relative to this folder
+WORKDIR /app/marble

@@ -1,0 +1,181 @@
+scenario: bugfix
+task_id: 1
+agents:
+- agent_id: agent1
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: "You are the Planner. You have the full technical specification below,\
+    \ including the exact bug and the required fix. Relay the necessary details to\
+    \ the Executor -- you cannot edit code yourself.\n\n# GH1006_spaCy_13068: Fix\
+    \ displacy span stacking — Full Specification (Planner Only)\n\n## Source\n- PR:\
+    \ https://github.com/explosion/spaCy/pull/13068\n- Issue: https://github.com/explosion/spaCy/issues/13056\n\
+    - Repo: https://github.com/explosion/spaCy\n\n## Issue Description\n\n<!-- NOTE:\
+    \ For questions or install related issues, please open a Discussion instead. -->\n\
+    \nHello,\n\nI'm trying to display spans with displacy render where I built the\
+    \ span manually. \n\nSeveral spans can be overlapped.\n\nSometimes when there\
+    \ are more than 3 spans overlapping, the rendering fails to render properly. \n\
+    \nIn the following image spans on the second line have 1 token in common so the\
+    \ render should have done 3 lines, instead it overlapped them.\n![image](https://github.com/explosion/spaCy/assets/74212431/4856e75c-d6ef-46ff-aeb3-7578eb166186)\n\
+    \n\n## How to reproduce the behaviour\n<!-- Include a code example or the steps\
+    \ that led to the problem. Please try to be as specific as possible. -->\n```code\n\
+    doc_rendering = {\n    \"text\": \"Welcome to the Bank of China.\",\n    \"spans\"\
+    : [\n        {\"start_token\": 2, \"end_token\": 5, \"label\": \"SkillNC\"},\n\
+    \        {\"start_token\": 0, \"end_token\": 2, \"label\": \"Skill\"},\n     \
+    \   {\"start_token\": 1, \"end_token\": 3, \"label\": \"Skill\"},\n    ],\n  \
+    \  \"tokens\": [\"Welcome\", \"to\", \"the\", \"Bank\", \"of\", \"China\", \"\
+    .\"],\n}\n```\n\n```code\nfrom spacy import displacy\n\nhtml = displacy.render(\n\
+    \        doc_rendering,\n        style=\"span\",\n        manual=True,\n     \
+    \   options={\"colors\": {\"Skill\": \"#56B4E9\", \"SkillNC\": \"#FF5733\"}},\n\
+    \    )\n```\n\n## Your Environment\n<!-- Include details of your environment.\
+    \ You can also type `python -m spacy info --markdown` and copy-paste the result\
+    \ here.-->\n* Operating System: linux\n* Python Version Used: 3.10\n* spaCy Version\
+    \ Used: 3.6.1\n* Environment Information: conda  23.5.2\n\nThanks for your help\
+    \ :)\n\n## Issue Discussion (Root Cause Analysis)\n\n### Comment 1 (@rmitsch):\n\
+    \nHi @mchlsam, thanks for reporting this! This looks like a bug - we'll look into\
+    \ it and update this thread.\n\n### Comment 2 (@github-actions[bot]):\n\nThis\
+    \ thread has been automatically locked since there has not been any recent activity\
+    \ after it was closed. Please open a new issue for related bugs.\n\n## Files Changed\
+    \ in Fix\n\n- `spacy/displacy/render.py` (modified, +30/-9)\n- `spacy/tests/test_displacy.py`\
+    \ (modified, +21/-1)\n\n## Diff Summary (What the Fix Changes)\n\n### `spacy/displacy/render.py`\n\
+    ```diff\n@@ -142,7 +142,25 @@ def render_spans(\n         spans (list): Individual\
+    \ entity spans and their start, end, label, kb_id and kb_url.\n         title\
+    \ (str / None): Document title set in Doc.user_data['title'].\n         \"\"\"\
+    \n-        per_token_info = []\n+        per_token_info = self._assemble_per_token_info(tokens,\
+    \ spans)\n+        markup = self._render_markup(per_token_info)\n+        markup\
+    \ = TPL_SPANS.format(content=markup, dir=self.direction)\n+        if title:\n\
+    +            markup = TPL_TITLE.format(title=title) + markup\n+        return\
+    \ markup\n+\n+    @staticmethod\n+    def _assemble_per_token_info(\n+       \
+    \ tokens: List[str], spans: List[Dict[str, Any]]\n+    ) -> List[Dict[str, List[Dict[str,\
+    \ Any]]]]:\n+        \"\"\"Assembles token info used to generate markup in render_spans().\n\
+    +        tokens (List[str]): Tokens in text.\n+        spans (List[Dict[str, Any]]):\
+    \ Spans in text.\n+        RETURNS (List[Dict[str, List[Dict, str, Any]]]): Per\
+    \ token info needed to render HTML markup for given tokens\n+            and spans.\n\
+    +        \"\"\"\n+        per_token_info: List[Dict[str, List[Dict[str, Any]]]]\
+    \ = []\n+\n         # we must sort so that we can correctly describe when spans\
+    \ need to \"stack\"\n         # which is determined by their start token, then\
+    \ span length (longer spans on top),\n         # then break any remaining ties\
+    \ with the span label\n@@ -154,29 +172,35 @@ def render_spans(\n             \
+    \    s[\"label\"],\n             ),\n         )\n+\n         for s in spans:\n\
+    \             # this is the vertical 'slot' that the span will be rendered in\n\
+    \             # vertical_position = span_label_offset + (offset_step * (slot -\
+    \ 1))\n             s[\"render_slot\"] = 0\n+\n         for idx, token in enumerate(tokens):\n\
+    \             # Identify if a token belongs to a Span (and which) and if it's\
+    \ a\n             # start token of said Span. We'll use this for the final HTML\
+    \ render\n             token_markup: Dict[str, Any] = {}\n             token_markup[\"\
+    text\"] = token\n-            concurrent_spans = 0\n+ \n```\n\n## Acceptance Criteria\n\
+    \n1. All tests in the test suite pass: `pytest -x -q`\n2. No regressions in unchanged\
+    \ functionality\n3. Fix matches the approach described in the issue/PR discussion\
+    \ above\n\n## Important Notes\n\n- Only modify the source files listed above (not\
+    \ test files)\n- The test files already encode the correct expected behaviour\n\
+    - Run `pytest -x -q` to verify your fix"
+- agent_id: agent2
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are the Executor. You only know the high-level problem below. You
+    must ask the Planner for the specific fix details before proposing any code change
+    -- do not guess at implementation details you were not given.
+
+
+    # GH1006_spaCy_13068: Fix displacy span stacking (Brief)
+
+
+    Fix the bug described by the Planner''s guidance in the workspace.
+
+
+    ## Files That May Need Changes
+
+
+    - `spacy/displacy/render.py`
+
+
+    ## Verification
+
+
+    Run the test suite to confirm your fix:
+
+
+    ```
+
+    pytest spacy/tests/test_displacy.py -x -q
+
+    ```
+
+
+    Do NOT modify test files.
+
+
+    Follow the Planner''s guidance precisely.'
+- agent_id: agent3
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: You are the Verifier. Once the Executor proposes a fix, check it against
+    the Planner's stated requirements and report whether it looks correct, complete,
+    and doesn't break the stated invariants.
+coordinate_mode: star
+engine_planner:
+  initial_progress: Starting bug-fix coordination for GH1006_spaCy_13068.
+environment:
+  max_iterations: 5
+  name: Bugfix Coordination Environment
+  type: Base
+llm: ollama/llama3.2:3b
+memory:
+  type: BaseMemory
+metrics:
+  evaluate_llm: ollama/llama3.2:3b
+  engagement_level: true
+  relevance: true
+output:
+  file_path: result/bugfix_output.jsonl
+  format: jsonl
+relationships:
+- - agent1
+  - agent2
+  - collaborate with
+- - agent1
+  - agent3
+  - collaborate with
+- - agent2
+  - agent3
+  - collaborate with
+task:
+  content: '
+
+    You are a 3-agent team fixing a real software bug from an open-source project.
+
+    agent1 is the Planner: they have the full technical specification of the bug
+
+    and required fix, but cannot edit any code themselves. agent2 is the Executor:
+
+    they only know the high-level problem statement and must ask the Planner for
+
+    the specific details needed to implement the fix -- they should not guess.
+
+    agent3 is the Verifier: once a fix is proposed, they check it against the
+
+    requirements and report whether it looks correct and complete.
+
+
+    Work together: the Planner should relay every specific requirement to the
+
+    Executor, the Executor should propose the concrete code change, and the
+
+    Verifier should give a final assessment of whether the fix satisfies the
+
+    specification.
+
+    '
+  output_format: 'Respond in this format:
+
+    **[Role and Action]**
+
+    State your role (Planner/Executor/Verifier) and what you are doing this turn.
+
+
+    **[Content]**
+
+    Your actual contribution: the Planner explains requirements, the Executor
+
+    proposes a concrete fix, the Verifier checks the fix against requirements.
+
+    '

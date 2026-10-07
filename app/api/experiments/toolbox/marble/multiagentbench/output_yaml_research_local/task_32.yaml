@@ -1,0 +1,159 @@
+scenario: research
+task_id: 32
+agents:
+- agent_id: agent1
+  profile: 'I am a researcher dedicated to advancing the field of machine learning
+    through innovative approaches grounded in information theory and causal inference.
+    My recent work explores the application of mutual information to enhance algorithm
+    design, enabling more efficient and generalizable learning systems. I have developed
+    frameworks that improve classification and regression tasks, particularly in the
+    context of cross-dataset transfer.
+
+
+    I am particularly interested in addressing challenges related to out-of-distribution
+    data and spurious correlations in causal models. My research introduces novel
+    metrics, such as Dataset Reconstruction Accuracy, to evaluate model effectiveness
+    and proposes intervention strategies to refine causal models in reinforcement
+    learning environments. Additionally, I have investigated the ethical implications
+    of recommender systems, advocating for values engineering that incorporates stakeholder
+    perspectives.
+
+
+    My work also delves into the calibration of machine learning classifiers, where
+    I have conducted comprehensive studies to improve the measurement of overconfidence
+    and underconfidence in predictions. I aim to enhance the reliability of machine
+    learning models, especially in critical domains like medicine, where understanding
+    model uncertainty is paramount. By leveraging Bayesian methods and RNN ensembles,
+    I strive to provide insights that can lead to better decision-making in healthcare.
+
+
+    Overall, my research is driven by a commitment to creating robust, interpretable,
+    and ethically aligned machine learning systems that can adapt to complex real-world
+    challenges.'
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+coordinate_mode: graph
+engine_planner:
+  initial_progress: Starting the collaborative research idea generation based on the
+    provided Introduction.
+environment:
+  max_iterations: 5
+  name: Research Collaboration Environment
+  type: Research
+llm: ollama/llama3.2:3b
+memory:
+  type: BaseMemory
+metrics:
+  diversity_of_perspectives: true
+  engagement_level: true
+  evaluate_llm: ollama/llama3.2:3b
+  relevance: true
+output:
+  file_path: result/research_output.jsonl
+  format: jsonl
+relationships: []
+task:
+  content: "\n            Dear Research Team,\n\n            You are collaborating\
+    \ to generate a new research idea based on the following Introduction:\n\n   \
+    \         **Introduction**\n\n             Introduction and Motivating Work\n\
+    Pre-training methods in natural language processing , pp.\n1527–1536, 2017.\n\
+    Stallkamp, J., Schlipsing, M., Salmen, J., and Igel, C. The\nGerman Trafﬁc Sign\
+    \ Recognition Benchmark: A multi-\nclass classiﬁcation competition. In IEEE International\n\
+    Joint Conference on Neural Networks , pp. 1453–1460,\n2011.\nStroud, J. C., Ross,\
+    \ D. A., Sun, C., Deng, J., Sukthankar, R.,\nand Schmid, C. Learning video representations\
+    \ from tex-\ntual web supervision. arXiv preprint arXiv:2007.14937 ,\n2020.\n\
+    Szegedy, C., Ioffe, S., Vanhoucke, V ., and Alemi,\nA. Inception-v4, inception-resnet\
+    \ and the impact\nof residual connections on learning. arXiv preprint\narXiv:1602.07261\
+    \ , 2016.\nTan, H. and Bansal, M. Lxmert: Learning cross-modality\nencoder representations\
+    \ from transformers. arXiv preprint\narXiv:1908.07490 , 2019.\nTan, M. and Le,\
+    \ Q. V . Efﬁcientnet: Rethinking model\nscaling for convolutional neural networks.\
+    \ arXiv preprint\narXiv:1905.11946 , 2019.\nTaori, R., Dave, A., Shankar, V .,\
+    \ Carlini, N., Recht, B.,\nand Schmidt, L. Measuring robustness to natural dis-\n\
+    tribution shifts in image classiﬁcation. arXiv preprint\narXiv:2007.00644 , 2020.\n\
+    Thomee, B., Shamma, D. A., Friedland, G., Elizalde, B., Ni,\nK., Poland, D., Borth,\
+    \ D., and Li, L.-J. Yfcc100m: The\nnew data in multimedia research. Communications\
+    \ of the\nACM , 59(2):64–73, 2016.Learning Transferable Visual Models From Natural\
+    \ Language Supervision 35\nTian, Y ., Krishnan, D., and Isola, P. Contrastive\
+    \ multiview\ncoding. arXiv preprint arXiv:1906.05849 , 2019.\nTian, Y ., Wang,\
+    \ Y ., Krishnan, D., Tenenbaum, J. B., and\nIsola, P. Rethinking few-shot image\
+    \ classiﬁcation: a\ngood embedding is all you need? arXiv preprint\narXiv:2003.11539\
+    \ , 2020.\nTorralba, A., Fergus, R., and Freeman, W. T. 80 million tiny\nimages:\
+    \ A large data set for nonparametric object and\nscene recognition. IEEE transactions\
+    \ on pattern analysis\nand machine intelligence , 30(11):1958–1970, 2008.\nTouvron,\
+    \ H., Vedaldi, A., Douze, M., and J ´egou, H. Fix-\ning the train-test resolution\
+    \ discrepancy. In Advances in\nneural information processing systems , pp. 8252–8262,\n\
+    2019.\nVaradarajan, J. and Odobez, J.-M. Topic models for scene\nanalysis and\
+    \ abnormality detection. In 2009 IEEE 12th\nInternational Conference on Computer\
+    \ Vision Workshops,\nICCV Workshops , pp. 1338–1345. IEEE, 2009.\nVaswani, A.,\
+    \ Shazeer, N., Parmar, N., Uszkoreit, J., Jones,\nL., Gomez, A. N., Kaiser, Ł.,\
+    \ and Polosukhin, I. Atten-\ntion is all you need. In Advances in neural information\n\
+    processing systems , pp. 5998–6008, 2017.\nVeeling, B. S., Linmans, J., Winkens,\
+    \ J., Cohen, T., and\nWelling, M. Rotation equivariant CNNs for digital pathol-\n\
+    ogy. June 2018.\nVirtanen, P., Gommers, R., Oliphant, T. E., Haberland, M.,\n\
+    Reddy, T., Cournapeau, D., Burovski, E., Peterson, P.,\nWeckesser, W., Bright,\
+    \ J., van der Walt, S. J., Brett, M.,\nWilson, J., Millman, K. J., Mayorov, N.,\
+    \ Nelson, A. R. J.,\nJones, E., Kern, R., Larson, E., Carey, C. J., Polat, ˙I.,\n\
+    Feng, Y ., Moore, E. W., VanderPlas, J., Laxalde, D.,\nPerktold, J., Cimrman,\
+    \ R., Henriksen, I., Quintero, E. A.,\nHarris, C. R., Archibald, A. M., Ribeiro,\
+    \ A. H., Pedregosa,\nF., van Mulbregt, P., and SciPy 1.0 Contributors. SciPy\n\
+    1.0: Fundamental Algorithms for Scientiﬁc Computing\nin Python. Nature results\
+    \ reported\nin Taori et al. (2020)’s evaluation suite. Zero-shot CLIP im-\nproves\
+    \ the state of the art on 5 of the 7 datasets, ImageNet-R,\nObjectNet, ImageNet-Sketch,\
+    \ ImageNet-Vid, and Youtube-\nBB. CLIP’s improvements are largest on ImageNet-Vid\
+    \ and\nYoutube-BB due to its ﬂexible zero-shot capability and on\nImageNet-R,\
+    \ which likely reﬂects CLIP’s pre-training dis-\ntribution including signiﬁcant\
+    \ amounts of creative content.\nA similar behavior has been documented for the\
+    \ Instagram\npre-trained ResNeXt models as discussed in Taori et al.\n(2020).Learning\
+    \ Transferable Visual Models From Natural Language Supervision 48\nF. Model Hyperparameters\n\
+    Hyperparameter Value\nBatch size\n\n            **Your Task**\n\n            1.\
+    \ **Literature Review**: Analyze the Introduction provided and conduct a brief\
+    \ literature review to understand the current state of research in this area.\n\
+    \n            2. **Brainstorming**: Collaboratively brainstorm potential research\
+    \ ideas that build upon or address gaps in the Introduction.\n\n            3.\
+    \ **Summarization**: Summarize your collective ideas.\n\n            4. **Formulate\
+    \ a New Research Idea**: Develop a new research proposal in the format of the\
+    \ '5q', defined below:\n\n               **Here is a high-level summarized insight\
+    \ of a research field Machine Learning.**\n\n               **Here are the five\
+    \ core questions:**\n\n               **[Question 1] - What is the problem?**\n\
+    \n               Formulate the specific research question you aim to address.\
+    \ Only output one question and do not include any more information.\n\n      \
+    \         **[Question 2] - Why is it interesting and important?**\n\n        \
+    \       Explain the broader implications of solving this problem for the research\
+    \ community.\n               Discuss how such a paper will affect future research.\n\
+    \               Discuss how addressing this question could advance knowledge or\
+    \ lead to practical applications.\n\n               **[Question 3] - Why is it\
+    \ hard?**\n\n               Discuss the challenges and complexities involved in\
+    \ solving this problem.\n               Explain why naive or straightforward approaches\
+    \ may fail.\n               Identify any technical, theoretical, or practical\
+    \ obstacles that need to be overcome. MAKE IT CLEAR.\n\n               **[Question\
+    \ 4] - Why hasn't it been solved before?**\n\n               Identify gaps or\
+    \ limitations in previous research or existing solutions.\n               Discuss\
+    \ any barriers that have prevented this problem from being solved until now.\n\
+    \               Explain how your approach differs from or improves upon prior\
+    \ work. MAKE IT CLEAR.\n\n               **[Question 5] - What are the key components\
+    \ of my approach and results?**\n\n               Outline your proposed methodology\
+    \ in detail, including the method, dataset, and metrics that you plan to use.\n\
+    \               Describe the expected outcomes. MAKE IT CLEAR.\n\n           \
+    \ Please work together to produce the '5q' for your proposed research idea.\n\n\
+    \            Good luck!\n            "
+  output_format: "You should answer the task in the fllowing format:\n           \
+    \     **[Question 1] - What is the problem?**\n\n                Formulate the\
+    \ specific research question you aim to address. Only output one question and\
+    \ do not include any more information.\n\n                **[Question 2] - Why\
+    \ is it interesting and important?**\n\n                Explain the broader implications\
+    \ of solving this problem for the research community.\n                Discuss\
+    \ how such a paper will affect future research.\n                Discuss how addressing\
+    \ this question could advance knowledge or lead to practical applications.\n\n\
+    \                **[Question 3] - Why is it hard?**\n\n                Discuss\
+    \ the challenges and complexities involved in solving this problem.\n        \
+    \        Explain why naive or straightforward approaches may fail.\n         \
+    \       Identify any technical, theoretical, or practical obstacles that need\
+    \ to be overcome. MAKE IT CLEAR.\n\n                **[Question 4] - Why hasn't\
+    \ it been solved before?**\n\n                Identify gaps or limitations in\
+    \ previous research or existing solutions.\n                Discuss any barriers\
+    \ that have prevented this problem from being solved until now.\n            \
+    \    Explain how your approach differs from or improves upon prior work. MAKE\
+    \ IT CLEAR.\n\n                **[Question 5] - What are the key components of\
+    \ my approach and results?**\n\n                Outline your proposed methodology\
+    \ in detail, including the method, dataset, and metrics that you plan to use.\n\
+    \                Describe the expected outcomes. MAKE IT CLEAR."

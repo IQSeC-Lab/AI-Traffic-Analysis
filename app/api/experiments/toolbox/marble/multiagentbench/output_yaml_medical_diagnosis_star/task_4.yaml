@@ -1,0 +1,115 @@
+scenario: medical_diagnosis
+task_id: 4
+agents:
+- agent_id: agent1
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are a physician on a diagnostic team. Your assigned candidate answer
+    to argue for is: "Coagulase-positive, gram-positive cocci forming mauve-colored
+    colonies on methicillin-containing agar". Evaluate whether the clinical evidence
+    in the case supports this option, and be willing to change your position if the
+    evidence points elsewhere.'
+- agent_id: agent2
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are a physician on a diagnostic team. Your assigned candidate answer
+    to argue for is: "Encapsulated, gram-negative coccobacilli forming grey-colored
+    colonies on charcoal blood agar". Evaluate whether the clinical evidence in the
+    case supports this option, and be willing to change your position if the evidence
+    points elsewhere.'
+- agent_id: agent3
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are a physician on a diagnostic team. Your assigned candidate answer
+    to argue for is: "Spore-forming, gram-positive bacilli forming yellow colonies
+    on casein agar". Evaluate whether the clinical evidence in the case supports this
+    option, and be willing to change your position if the evidence points elsewhere.'
+- agent_id: agent4
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are a physician on a diagnostic team. Your assigned candidate answer
+    to argue for is: "Lactose-fermenting, gram-negative rods forming pink colonies
+    on MacConkey agar". Evaluate whether the clinical evidence in the case supports
+    this option, and be willing to change your position if the evidence points elsewhere.'
+coordinate_mode: star
+engine_planner:
+  initial_progress: Starting clinical case discussion.
+environment:
+  max_iterations: 5
+  name: Medical Diagnosis Coordination Environment
+  type: Base
+llm: ollama/llama3.2:3b
+memory:
+  type: BaseMemory
+metrics:
+  evaluate_llm: ollama/llama3.2:3b
+  engagement_level: true
+  relevance: true
+output:
+  file_path: result/medical_diagnosis_output.jsonl
+  format: jsonl
+relationships:
+- - agent1
+  - agent2
+  - collaborate with
+- - agent1
+  - agent3
+  - collaborate with
+- - agent1
+  - agent4
+  - collaborate with
+- - agent2
+  - agent3
+  - collaborate with
+- - agent2
+  - agent4
+  - collaborate with
+- - agent3
+  - agent4
+  - collaborate with
+task:
+  content: '
+
+    A team of physicians is evaluating the following real clinical case:
+
+
+    **Case**
+
+
+    A 39-year-old woman is brought to the emergency department because of fevers,
+    chills, and left lower quadrant pain. Her temperature is 39.1°C (102.3°F), pulse
+    is 126/min, respirations are 28/min, and blood pressure is 80/50 mm Hg. There
+    is blood oozing around the site of a peripheral intravenous line. Pelvic examination
+    shows mucopurulent discharge from the cervical os and left adnexal tenderness.
+    Laboratory studies show:
+
+    Platelet count 14,200/mm3
+
+    Fibrinogen 83 mg/mL (N = 200–430 mg/dL)
+
+    D-dimer 965 ng/mL (N < 500 ng/mL)
+
+    When phenol is applied to a sample of the patient''s blood at 90°C, a phosphorylated
+    N-acetylglucosamine dimer with 6 fatty acids attached to a polysaccharide side
+    chain is identified. A blood culture is most likely to show which of the following?"
+
+
+    Each physician on the team will argue for a different candidate answer.
+
+    Discuss the evidence for and against each option, challenge each other''s
+
+    reasoning, and converge on the single best-supported answer.
+
+    '
+  output_format: 'Respond in this format:
+
+    **[Your Position]**
+
+    Which option you are arguing for or evaluating this turn.
+
+
+    **[Clinical Reasoning]**
+
+    The evidence from the case that supports or refutes this option.
+
+    '

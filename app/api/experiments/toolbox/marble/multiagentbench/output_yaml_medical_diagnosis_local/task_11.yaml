@@ -1,0 +1,117 @@
+scenario: medical_diagnosis
+task_id: 11
+agents:
+- agent_id: agent1
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are a physician on a diagnostic team. Your assigned candidate answer
+    to argue for is: "Cladribine". Evaluate whether the clinical evidence in the case
+    supports this option, and be willing to change your position if the evidence points
+    elsewhere.'
+- agent_id: agent2
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are a physician on a diagnostic team. Your assigned candidate answer
+    to argue for is: "Prednisone". Evaluate whether the clinical evidence in the case
+    supports this option, and be willing to change your position if the evidence points
+    elsewhere.'
+- agent_id: agent3
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are a physician on a diagnostic team. Your assigned candidate answer
+    to argue for is: "Imatinib". Evaluate whether the clinical evidence in the case
+    supports this option, and be willing to change your position if the evidence points
+    elsewhere.'
+- agent_id: agent4
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are a physician on a diagnostic team. Your assigned candidate answer
+    to argue for is: "Ruxolitinib". Evaluate whether the clinical evidence in the
+    case supports this option, and be willing to change your position if the evidence
+    points elsewhere.'
+coordinate_mode: graph
+engine_planner:
+  initial_progress: Starting clinical case discussion.
+environment:
+  max_iterations: 5
+  name: Medical Diagnosis Coordination Environment
+  type: Base
+llm: ollama/llama3.2:3b
+memory:
+  type: BaseMemory
+metrics:
+  evaluate_llm: ollama/llama3.2:3b
+  engagement_level: true
+  relevance: true
+output:
+  file_path: result/medical_diagnosis_output.jsonl
+  format: jsonl
+relationships:
+- - agent1
+  - agent2
+  - collaborate with
+- - agent1
+  - agent3
+  - collaborate with
+- - agent1
+  - agent4
+  - collaborate with
+- - agent2
+  - agent3
+  - collaborate with
+- - agent2
+  - agent4
+  - collaborate with
+- - agent3
+  - agent4
+  - collaborate with
+task:
+  content: '
+
+    A team of physicians is evaluating the following real clinical case:
+
+
+    **Case**
+
+
+    A 72-year-old man comes to the physician because of a 2-month history of fatigue
+    and worsening abdominal pain. During this period, he also has excessive night
+    sweats and shortness of breath on exertion. Over the past 3 months, he has had
+    a 5.6-kg (12-lb) weight loss. He had a myocardial infarction 3 years ago. He has
+    hypertension, diabetes mellitus, and chronic bronchitis. His medications include
+    insulin, aspirin, lisinopril, and an albuterol inhaler. He has smoked half a pack
+    of cigarettes for the past 45 years. Vital signs are within normal limits. The
+    spleen is palpated 6 cm below the left costal margin. Laboratory studies show:
+
+    Hemoglobin 6.4 g/dL
+
+    Mean corpuscular volume 85 μm3
+
+    Leukocyte count 5,200/mm3
+
+    Platelet count 96,000/mm3
+
+    A blood smear is shown. Bone marrow aspiration shows extensive fibrosis and a
+    few scattered plasma cells. A JAK 2 assay is positive. Which of the following
+    is the most appropriate next step in management?"
+
+
+    Each physician on the team will argue for a different candidate answer.
+
+    Discuss the evidence for and against each option, challenge each other''s
+
+    reasoning, and converge on the single best-supported answer.
+
+    '
+  output_format: 'Respond in this format:
+
+    **[Your Position]**
+
+    Which option you are arguing for or evaluating this turn.
+
+
+    **[Clinical Reasoning]**
+
+    The evidence from the case that supports or refutes this option.
+
+    '

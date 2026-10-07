@@ -45,6 +45,33 @@ export type ModelsResponse = {
   downloads: Download[];
 };
 
+/** A model pulled from the Ollama library: the agentic experiments, and the Data Collector on Ollama. */
+export type OllamaModel = {
+  model: string; // as Ollama names it, tag included: llama3.2:3b
+  size_bytes: number;
+  complete: boolean;
+  gpu_memory_mb: number | null;
+  downloading: boolean;
+};
+
+export type OllamaModelsResponse = {
+  models_dir: string;
+  models: OllamaModel[];
+  downloads: Download[];
+};
+
+/** What a Topology Transfer run can use, from the MARBLE code on the server. */
+export type TaskCatalog = {
+  available: boolean; // false: the MARBLE code isn't where the API looks for it
+  problem: string | null;
+  marble_dir: string;
+  repo: string;
+  default_model: string;
+  dataset_tasks: number; // the published dataset uses tasks 1 to this of each category
+  topologies: { key: string; label: string }[];
+  categories: { slug: string; label: string; disabled: string | null; tasks: number[] }[];
+};
+
 export type TokenStatus = {
   set: boolean;
   source: "saved" | "env" | null;
@@ -100,6 +127,10 @@ export type Scenario = {
 
 export type RunConfig = {
   model?: string; // every experiment but Scalability and the Custom Experiment
+  provider?: "transformers" | "ollama"; // Data Collector: the app's own server, or Ollama
+  topologies?: string[]; // Topology Transfer
+  categories?: string[]; // Topology Transfer: MARBLE task categories
+  tasks?: number[]; // Topology Transfer: task numbers run in every category
   models?: string[]; // Scalability: the models compared
   scenarios?: Scenario[]; // Custom Experiment
   prompt_source?: "library" | "written"; // Custom Experiment: prompt library numbers, or prompts written for it
@@ -253,6 +284,92 @@ export type CaptureDetail = {
   response: string | null;
   stream_timeline: [number, number][];
   events: [number, number, string][];
+  downsampled: boolean;
+};
+
+// ── Agentic runs: a capture is a MARBLE task, measured over every connection of its agents ──
+
+export type AgenticMetrics = {
+  packets: number; // everything captured
+  bytes: number;
+  capture_s: number;
+  // The measurements of the dataset's analysis, over the encrypted application packets
+  total_packets: number | null;
+  total_bytes: number | null;
+  task_duration: number | null;
+  packets_per_second: number | null;
+  total_bursts: number | null;
+  idle_time_fraction: number | null;
+  incoming_packets: number;
+  median_packet_bytes: number | null;
+  median_gap_ms: number | null;
+  calls: number | null; // LLM calls the agents made
+  agents: number | null;
+  run_s: number | null; // how long MARBLE ran
+};
+
+/** Medians over the completed tasks of a group. */
+export type AgenticStats = {
+  captures: number; // completed tasks
+  failed: number;
+  median_total_packets: number | null;
+  median_total_bytes: number | null;
+  median_task_duration: number | null;
+  median_packets_per_second: number | null;
+  median_total_bursts: number | null;
+  median_idle_time_fraction: number | null;
+  median_calls: number | null;
+  median_agents: number | null;
+  median_gap_ms: number | null;
+  median_packet_bytes: number | null;
+  total_bytes: number;
+};
+
+/** Per topology: task categories (rows) against traffic measurements (columns), standardized across the categories. */
+export type TrafficHeatmap = {
+  metrics: { key: string; label: string }[];
+  topologies: {
+    key: string;
+    label: string;
+    categories: string[];
+    tasks: number[]; // tasks behind each category's row
+    z: (number | null)[][];
+    medians: (number | null)[][];
+  }[];
+};
+
+export type AgenticAnalytics = {
+  summary: AgenticStats;
+  groups: { key: string; label: string; summary: AgenticStats; by_category: (AgenticStats & { category: string })[] }[];
+  gap_hist: Histogram;
+  size_hist: Histogram;
+  heatmap: TrafficHeatmap;
+};
+
+export type TaskStatus = "running" | "completed" | "failed";
+
+export type AgenticCapture = {
+  key: string;
+  variant: string;
+  index: number;
+  prompt: number; // the task's number in the run
+  iteration: number | null;
+  category: string | null;
+  task_id: number | null; // its number in its MARBLE category
+  status: TaskStatus | null;
+  worker?: number | null;
+  gpus?: number[] | null;
+  metrics: Partial<AgenticMetrics>;
+  error: string | null;
+};
+
+export type AgenticCaptureDetail = AgenticCapture & {
+  task_text: string;
+  timeline: [number, number, number][]; // seconds, payload bytes, 1 to the model server / -1 from it
+  calls: [string, number, number][]; // agent, start and end in seconds
+  agents: { agent: string; calls: number; packets: number; bytes: number }[];
+  unattributed_packets: number;
+  log_tail: string;
   downsampled: boolean;
 };
 

@@ -1,0 +1,10 @@
+# Only what Dockerfile.marble copies is sent to Docker: a MARBLE folder that was also used to
+# collect a dataset by hand holds gigabytes of captures and a virtual environment.
+*
+!requirements.txt
+!marble
+!data
+!scripts
+**/__pycache__
+marble/logs
+marble/result

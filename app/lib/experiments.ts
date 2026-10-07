@@ -25,12 +25,15 @@ export type ExperimentInfo = {
   defaults?: { category?: string; repeat?: number };
   /** Its prompts are written in the experiment itself instead of chosen from the prompt library. */
   ownPrompts?: boolean;
+  /** Agentic AI: a capture is a MARBLE task worked on by several agents, not one prompt and its response. */
+  agentic?: boolean;
 };
 
 // A run compares at most 8 temperatures, models, network conditions or scenarios: one chart color each.
 export const MAX_VARIANTS = 8;
 
-// The experiments from the repo (2-6), then the one the app adds.
+// Client to server: the experiments from the repo (2-6), then the one the app adds.
+// Agentic AI (`agentic`): MARBLE, several agents in a graph or star topology calling one LLM server.
 export const EXPERIMENTS: ExperimentInfo[] = [
   {
     slug: "data-collector",
@@ -98,21 +101,19 @@ export const EXPERIMENTS: ExperimentInfo[] = [
     variable: { one: "scenario", many: "scenarios" },
     scenarios: true,
   },
-];
-
-// The agentic AI experiments (MARBLE: several agents in a graph or star topology calling one LLM server).
-// Not in the app yet, so they are kept out of EXPERIMENTS: they have no runs, forms or pages.
-// The ten-category traffic heatmap is not one of them, it belongs in the Results of an agentic run.
-export const AGENTIC_EXPERIMENTS: ExperimentInfo[] = [
   {
     slug: "topology-transfer",
     name: "Topology Transfer",
-    summary: "Across topologies and visible agents",
+    summary: "The same tasks under graph and star",
     description:
-      "Task fingerprinting within one topology and from graph to star, and how accuracy changes with the number of agents whose traffic is observed.",
+      "Several agents work on a MARBLE task through one LLM server, and a run captures every task once per coordination topology. The topology is the only thing that changes, so a task fingerprint learned on one can be tested on the other.",
     icon: Waypoints,
-    available: false,
+    available: true,
+    variable: { one: "topology", many: "topologies" },
+    agentic: true,
   },
+  // An analysis over the captures of Topology Transfer runs, not another kind of capture. Not in the app yet.
+  // (The ten-category traffic heatmap is in the Results of every agentic run.)
   {
     slug: "feature-importance",
     name: "Feature Importance",
@@ -121,8 +122,13 @@ export const AGENTIC_EXPERIMENTS: ExperimentInfo[] = [
       "Which of the 247 traffic features identify a task. Random Forests are trained per topology over five task-grouped folds, and the ten most important features are ranked for graph and star.",
     icon: ChartBarDecreasing,
     available: false,
+    agentic: true,
   },
 ];
+
+export const CLIENT_EXPERIMENTS = EXPERIMENTS.filter((e) => !e.agentic);
+export const AGENTIC_EXPERIMENTS = EXPERIMENTS.filter((e) => e.agentic);
+export const isAgentic = (slug: string) => EXPERIMENTS.some((e) => e.slug === slug && e.agentic);
 
 /** An experiment that can be opened in the app, by slug. */
 export const availableExperiment = (slug: string) => EXPERIMENTS.find((e) => e.slug === slug && e.available);

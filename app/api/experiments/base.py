@@ -103,6 +103,15 @@ class Kind:
     # The run's prompts as {number: {"text", "category"}}, raising ValueError when they can't run.
     # None: prompt numbers from the prompt library (library_prompts).
     prompts: Callable[[RunConfig], dict[int, dict]] | None = None
+    # Runs that don't load a HuggingFace model in the app's own server (the Data Collector on
+    # Ollama, the agentic experiments) are run by a subclass of engine.Experiment:
+    # GPU memory one worker needs, raising ValueError when the run can't start.
+    # None: the run's HuggingFace models must be downloaded, and the largest sets it.
+    check: Callable[[RunConfig, list[Variant]], int] | None = None
+    # The engine.Experiment subclass for these settings. None: engine.Experiment.
+    runner: Callable[[RunConfig], type | None] | None = None
+    sampled: bool = True                          # False: its variants don't take the default temperature
+    agentic: bool = False                         # analyzed by marble_analysis.py instead of analysis.py
 
     @property
     def run_label(self) -> str:

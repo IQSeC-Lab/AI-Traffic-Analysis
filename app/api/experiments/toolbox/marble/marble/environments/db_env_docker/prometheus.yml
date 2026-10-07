@@ -1,0 +1,27 @@
+global:
+  scrape_interval:     3s
+  evaluation_interval: 60s
+  scrape_timeout: 3s
+
+# Alertmanager configuration to send alerts as JSON to a webhook
+# alerting:
+#   alertmanagers:
+#   - static_configs:
+#     - targets: ['localhost:9093']
+
+# Load rules once and periodically evaluate them according to the global 'evaluation_interval'.
+rule_files:
+  - "/usr/local/prometheus/rules/*_rules.yml"
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'node_exporter'
+    static_configs:
+      - targets: ['node_exporter:9100']
+
+  - job_name: 'postgres_exporter'
+    static_configs:
+      - targets: ['pg_exporter:9187']

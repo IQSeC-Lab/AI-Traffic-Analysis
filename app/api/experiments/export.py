@@ -11,11 +11,19 @@ from typing import Iterator
 from .base import Variant
 
 RUN_FILES = ("run.json", "run.log", "prompts.json")
-RUN_FOLDERS = ("captures", "results", "logs")   # the analysis/ cache is left out; it is rebuilt from these
+# The analysis/ cache is left out; it is rebuilt from these. configs/ is an agentic run's MARBLE configs.
+RUN_FOLDERS = ("captures", "results", "logs", "configs")
 
 METRIC_COLUMNS = [
     "events", "ttft_ms", "duration_s", "events_per_s", "response_chars",
     "stream_packets", "stream_bytes", "stream_s", "median_packet_bytes", "median_gap_ms",
+    "packets", "bytes", "capture_s",
+]
+# An agentic run's captures (marble_analysis.py): the dataset's measurements, under its names
+AGENTIC_COLUMNS = [
+    "calls", "agents", "run_s",
+    "total_packets", "total_bytes", "task_duration", "packets_per_second", "total_bursts", "idle_time_fraction",
+    "incoming_packets", "median_packet_bytes", "median_gap_ms",
     "packets", "bytes", "capture_s",
 ]
 
@@ -60,22 +68,24 @@ def zip_run(run_dir: Path, name: str) -> Iterator[bytes]:
     yield buffer.drain()   # the zip's central directory
 
 
-def captures_csv(records: list[dict], variants: list[Variant]) -> str:
+def captures_csv(records: list[dict], variants: list[Variant], agentic: bool = False) -> str:
     """One row per capture: its file stem, the settings of its variant (temperature, model,
-    network condition), its prompt, the worker that made it and its metrics."""
+    network condition, topology), its prompt or task, the worker that made it and its metrics."""
     by_key = {v.key: v for v in variants}
     settings = list(dict.fromkeys(c for v in variants for c in v.columns))
+    extra = ["task_id", "status"] if agentic else []
+    metrics = AGENTIC_COLUMNS if agentic else METRIC_COLUMNS
     out = io.StringIO()
     writer = csv.writer(out)
-    writer.writerow(["capture", *settings, "index", "prompt", "iteration", "category", "worker", "gpus", *METRIC_COLUMNS])
+    writer.writerow(["capture", *settings, "index", "prompt", "iteration", "category", *extra, "worker", "gpus", *metrics])
     for r in records:
         m = r.get("metrics") or {}
         gpus = r.get("gpus")
         columns = by_key[r["variant"]].columns
         writer.writerow([
             r["key"], *(columns.get(c) for c in settings),
-            r["index"], r["prompt"], r["iteration"], r["category"], r.get("worker"),
+            r["index"], r["prompt"], r["iteration"], r["category"], *(r.get(c) for c in extra), r.get("worker"),
             " ".join(map(str, gpus)) if gpus is not None else None,
-            *(m.get(c) for c in METRIC_COLUMNS),
+            *(m.get(c) for c in metrics),
         ])
     return out.getvalue()

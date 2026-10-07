@@ -1,5 +1,5 @@
 import type { Run, Variant } from "@/lib/api";
-import { EXPERIMENTS } from "@/lib/experiments";
+import { EXPERIMENTS, isAgentic } from "@/lib/experiments";
 
 export const modelName = (model: string) => model.split("/").pop() ?? model;
 
@@ -15,7 +15,8 @@ export const runTitle = (run: Pick<Run, "name" | "models">) => {
  * run, or a Custom Experiment with several. Runs from before it was recorded sampled at 0.7.
  */
 export function runTemperature(run: Pick<Run, "experiment" | "variants">): number | null {
-  if (run.experiment === "temperature-change") return null;
+  // An agentic run's sampling is MARBLE's own, not a setting of the run
+  if (run.experiment === "temperature-change" || isAgentic(run.experiment)) return null;
   const temperatures = new Set(run.variants.map((v) => v.temperature ?? 0.7));
   return temperatures.size === 1 ? [...temperatures][0] : null;
 }

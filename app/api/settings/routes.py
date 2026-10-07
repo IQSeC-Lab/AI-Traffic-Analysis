@@ -9,9 +9,9 @@ import tempfile
 from pathlib import Path
 
 from experiments import engine
-from storage import DATA_DIR, MODELS_DIR, model_dir_name
+from storage import DATA_DIR, MODELS_DIR, OLLAMA_DIR, model_dir_name
 
-from . import model_downloader, store
+from . import model_downloader, ollama_models, store
 from .model_downloader import DownloadRequest
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -23,6 +23,11 @@ class ResultsDirRequest(BaseModel):
 
 class TokenRequest(BaseModel):
     token: str = Field(..., min_length=1)
+
+
+class OllamaPullRequest(BaseModel):
+    model: str = Field(..., pattern=ollama_models.MODEL_PATTERN,
+                       description="Name in the Ollama library, with its tag: llama3.2:3b")
 
 
 class TemperatureRequest(BaseModel):
@@ -148,3 +153,40 @@ def download_model(req: DownloadRequest) -> dict:
     except (model_downloader.AlreadyDownloaded, model_downloader.DownloadConflict) as e:
         raise HTTPException(409, str(e))
     return download.summary()
+
+
+# ── Ollama models (the agentic experiments, and the Data Collector on Ollama) ─
+
+@router.get("/ollama-models")
+def list_ollama_models() -> dict:
+    return {
+        "models_dir": str(OLLAMA_DIR),
+        "models": ollama_models.list_models(),
+        "downloads": [p.summary() for p in ollama_models.all_pulls()],
+    }
+
+
+@router.post("/ollama-models/download", status_code=202)
+def download_ollama_model(req: OllamaPullRequest) -> dict:
+    """Pull a model from the Ollama library in the background. Downloads run one at a time."""
+    try:
+        pulling = ollama_models.start(req.model)
+    except (ollama_models.AlreadyPulled, ollama_models.PullConflict) as e:
+        raise HTTPException(409, str(e))
+    return pulling.summary()
+
+
+@router.delete("/ollama-models/{model:path}", status_code=204)
+def delete_ollama_model(model: str) -> Response:
+    """Delete a pulled model. Refused while it downloads or an active run uses it."""
+    name = ollama_models.normalize(model)
+    in_use = [r.id for r in engine.active_runs() if name in {ollama_models.normalize(m) for m in r.models}]
+    if in_use:
+        raise HTTPException(409, f"Run {in_use[0]} is using this model. Cancel it or wait for it to finish.")
+    try:
+        deleted = ollama_models.delete(model)
+    except ollama_models.ModelInUse as e:
+        raise HTTPException(409, str(e))
+    if not deleted:
+        raise HTTPException(404, f"Model not found: {model}")
+    return Response(status_code=204)

@@ -1,0 +1,146 @@
+scenario: bugfix
+task_id: 3
+agents:
+- agent_id: agent1
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: "You are the Planner. You have the full technical specification below,\
+    \ including the exact bug and the required fix. Relay the necessary details to\
+    \ the Executor -- you cannot edit code yourself.\n\n# GH10 Specification: Fix\
+    \ Task Retry Backoff Calculation\n\n## Background\n\nThe `task_queue.py` module\
+    \ implements a Celery-inspired retry mechanism using\nexponential backoff with\
+    \ jitter. The implementation contains three related bugs\nin `RetryPolicy.calculate_delay()`\
+    \ that cause incorrect delay values.\n\n## Bug Descriptions\n\n### Issue 1: No\
+    \ `max_delay` cap applied\n\n`RetryPolicy` accepts a `max_delay` parameter (default\
+    \ 300.0 seconds), but\n`calculate_delay` never enforces it.\n\n```\ndelay = base_delay\
+    \ * (backoff_factor ** attempt)\n```\n\nWith `base_delay=1.0`, `backoff_factor=2.0`,\
+    \ and `attempt=30`, this yields\n`1073741824` seconds — roughly 34 years. Long-running\
+    \ workflows with many\nretry attempts silently schedule tasks arbitrarily far\
+    \ into the future.\n\n**Fix**: Apply the cap before jitter: `delay = min(delay,\
+    \ max_delay)`.\n\n### Issue 2: Jitter can produce negative delay\n\nJitter is\
+    \ applied using an absolute offset derived from `max_delay`, not\nfrom the current\
+    \ computed delay:\n\n```python\njitter_amount = self.max_delay * self.jitter\n\
+    delay += random.uniform(-jitter_amount, jitter_amount)\n```\n\nFor early retries\
+    \ where the base delay is small (e.g., attempt 0 with\n`base_delay=0.1` gives\
+    \ `delay=0.1`), `jitter_amount` can be orders of\nmagnitude larger than `delay`\
+    \ (e.g., `300.0 * 0.5 = 150.0`). The random\nsubtraction easily drives `delay`\
+    \ deeply negative. A negative delay is\ninterpreted by the scheduler as an immediate\
+    \ retry with no backoff,\ndefeating the entire purpose of the mechanism.\n\n**Fix**:\
+    \ After applying jitter, clamp: `delay = max(0.0, delay)`.\n\n### Issue 3: Jitter\
+    \ applied after `max_delay` cap (wrong order)\n\nEven if a `max_delay` cap were\
+    \ added naively at the end, jitter applied\nafter capping can push the final delay\
+    \ above `max_delay`:\n\n```python\ndelay = min(delay, max_delay)   # capped at\
+    \ max_delay\ndelay += random.uniform(...)    # jitter pushes it above max_delay\
+    \ again\n```\n\n**Fix**: The correct order is:\n1. Calculate base exponential:\
+    \ `delay = base_delay * (backoff_factor ** attempt)`\n2. Apply `max_delay` cap:\
+    \ `delay = min(delay, max_delay)`\n3. Apply jitter (additive or multiplicative)\
+    \ within `[0, max_delay]`\n4. Clamp final result: `delay = max(0.0, min(delay,\
+    \ max_delay))`\n\n## What Is Correct (Do Not Change)\n\n- Task registration and\
+    \ decorator logic are correct.\n- The task state machine (`PENDING → RUNNING →\
+    \ SUCCESS / FAILED / RETRY`) is correct.\n- Retry count tracking (`attempt` incremented\
+    \ on each retry, task fails when\n  `attempt > max_retries`) is correct.\n- The\
+    \ `TaskQueue.submit()` synchronous execution loop is correct.\n- All other `RetryPolicy`\
+    \ fields (`max_retries`, `base_delay`, `backoff_factor`,\n  `jitter`, `max_delay`)\
+    \ are correctly defined; only `calculate_delay` is broken.\n\n## Expected Behavior\
+    \ After Fix\n\n| Scenario | Before fix | After fix |\n|---|---|---|\n| `attempt=30`,\
+    \ `max_delay=300` | 1,073,741,824 s | 300.0 s |\n| `attempt=0`, `jitter=1.0`,\
+    \ bad RNG | −0.83 s | 0.0 s |\n| `attempt=7`, `max_delay=100`, `jitter=0.5` |\
+    \ up to 192 s | ≤ 100.0 s |\n\nThe three test cases that directly exercise these\
+    \ bugs are:\n- `test_max_delay_cap` — delay must not exceed `max_delay`\n- `test_delay_never_negative`\
+    \ — delay must be ≥ 0\n- `test_jitter_bounded` — delay must stay within `[0, max_delay]`\
+    \ under jitter"
+- agent_id: agent2
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are the Executor. You only know the high-level problem below. You
+    must ask the Planner for the specific fix details before proposing any code change
+    -- do not guess at implementation details you were not given.
+
+
+    # GH10: Fix Task Retry Backoff Calculation
+
+
+    The task queue''s exponential backoff retry has bugs where delays become
+
+    unreasonably large or negative under certain configurations. Users report
+
+    tasks either retrying instantly (zero/negative delay) or being scheduled
+
+    days into the future.
+
+
+    Fix the retry logic in `task_queue.py`.'
+- agent_id: agent3
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: You are the Verifier. Once the Executor proposes a fix, check it against
+    the Planner's stated requirements and report whether it looks correct, complete,
+    and doesn't break the stated invariants.
+coordinate_mode: star
+engine_planner:
+  initial_progress: Starting bug-fix coordination for GH10_retry_backoff.
+environment:
+  max_iterations: 5
+  name: Bugfix Coordination Environment
+  type: Base
+llm: ollama/llama3.2:3b
+memory:
+  type: BaseMemory
+metrics:
+  evaluate_llm: ollama/llama3.2:3b
+  engagement_level: true
+  relevance: true
+output:
+  file_path: result/bugfix_output.jsonl
+  format: jsonl
+relationships:
+- - agent1
+  - agent2
+  - collaborate with
+- - agent1
+  - agent3
+  - collaborate with
+- - agent2
+  - agent3
+  - collaborate with
+task:
+  content: '
+
+    You are a 3-agent team fixing a real software bug from an open-source project.
+
+    agent1 is the Planner: they have the full technical specification of the bug
+
+    and required fix, but cannot edit any code themselves. agent2 is the Executor:
+
+    they only know the high-level problem statement and must ask the Planner for
+
+    the specific details needed to implement the fix -- they should not guess.
+
+    agent3 is the Verifier: once a fix is proposed, they check it against the
+
+    requirements and report whether it looks correct and complete.
+
+
+    Work together: the Planner should relay every specific requirement to the
+
+    Executor, the Executor should propose the concrete code change, and the
+
+    Verifier should give a final assessment of whether the fix satisfies the
+
+    specification.
+
+    '
+  output_format: 'Respond in this format:
+
+    **[Role and Action]**
+
+    State your role (Planner/Executor/Verifier) and what you are doing this turn.
+
+
+    **[Content]**
+
+    Your actual contribution: the Planner explains requirements, the Executor
+
+    proposes a concrete fix, the Verifier checks the fix against requirements.
+
+    '

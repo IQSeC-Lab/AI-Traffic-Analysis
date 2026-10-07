@@ -12,6 +12,8 @@ import {
   type LocalModel,
   type ModelsResponse,
   type NetworkCondition,
+  type OllamaModel,
+  type OllamaModelsResponse,
   type Prompt,
   type PromptLibrary,
   type Run,
@@ -43,7 +45,7 @@ function conditionProblem(conditions: NetworkCondition[], i: number): string | n
   return same < i ? `Same as condition ${same + 1}.` : null;
 }
 
-function SelectCard({
+export function SelectCard({
   selected,
   onClick,
   children,
@@ -86,12 +88,17 @@ export function RunForm({ experiment }: { experiment: string }) {
   const writesPrompts = info?.ownPrompts ?? false; // Custom Prompts: written here, not chosen from the library
   const sweepsTemperature = experiment === "temperature-change";
   const setsTemperature = sweepsTemperature || byScenario; // instead of sampling at the default in Settings
+  const picksProvider = experiment === "data-collector"; // the app's own server, or Ollama
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [models, setModels] = useState<LocalModel[] | null>(null);
   const [prompts, setPrompts] = useState<Prompt[]>([]);
   const [activeRuns, setActiveRuns] = useState<Run[]>([]);
 
   const [model, setModel] = useState("");
+  const [provider, setProvider] = useState<"transformers" | "ollama">("transformers");
+  const [ollamaModels, setOllamaModels] = useState<OllamaModel[]>([]);
+  const [ollamaModel, setOllamaModel] = useState("");
+  const onOllama = picksProvider && provider === "ollama";
   const [modelsChosen, setModelsChosen] = useState<string[]>([]); // Scalability: the models compared
   const [temperatures, setTemperatures] = useState<number[]>([0.3, 0.7, 0.9]);
   const [customTemperature, setCustomTemperature] = useState("");
@@ -124,8 +131,12 @@ export function RunForm({ experiment }: { experiment: string }) {
       writesPrompts ? Promise.resolve<PromptLibrary>({ prompts: [], categories: [] }) : api<PromptLibrary>("/prompts"),
       api<Run[]>("/experiments/active"),
       api<Settings>("/settings"),
+      picksProvider ? api<OllamaModelsResponse>("/settings/ollama-models") : Promise.resolve(null),
     ])
-      .then(([sys, downloaded, library, active, settings]) => {
+      .then(([sys, downloaded, library, active, settings, ollama]) => {
+        const pulled = ollama?.models.filter((m) => m.complete && !m.downloading) ?? [];
+        setOllamaModels(pulled);
+        setOllamaModel(pulled[0]?.model ?? "");
         const ready = downloaded.models.filter((m) => m.complete && !m.downloading);
         // Scalability goes from the smallest model to the largest, so its charts read that way too
         if (multiModel) ready.sort((a, b) => a.size_bytes - b.size_bytes);
@@ -146,7 +157,7 @@ export function RunForm({ experiment }: { experiment: string }) {
         setDefaultTemperature(settings.default_temperature);
       })
       .catch((e: Error) => setError(e.message));
-  }, [multiModel, writesPrompts, info]);
+  }, [multiModel, writesPrompts, picksProvider, info]);
 
   const categories = useMemo(() => {
     const groups = new Map<string, Prompt[]>();
@@ -235,7 +246,9 @@ export function RunForm({ experiment }: { experiment: string }) {
         ? { scenarios: scenarios.map(toScenario), prompt_source: promptSource }
         : multiModel
           ? { models: modelsChosen }
-          : { model }),
+          : onOllama
+            ? { model: ollamaModel, provider }
+            : { model }),
       ...(experiment === "temperature-change" && { temperatures }),
       ...(experiment === "delay" && { conditions }),
       gpus: !onGpu ? [] : gpuMode === "auto" ? "auto" : gpus,
@@ -266,10 +279,19 @@ export function RunForm({ experiment }: { experiment: string }) {
   const modelRefs = byScenario ? scenarios.map((s) => s.model) : multiModel ? modelsChosen : [model];
   const chosen = models.filter((m) => modelRefs.includes(modelRef(m)));
   const severalModels = chosen.length > 1;
-  const needMb = chosen.some((m) => m.gpu_memory_mb != null) ? Math.max(...chosen.map((m) => m.gpu_memory_mb ?? 0)) : null;
+  const needMb = onOllama
+    ? (ollamaModels.find((m) => m.model === ollamaModel)?.gpu_memory_mb ?? null)
+    : chosen.some((m) => m.gpu_memory_mb != null)
+      ? Math.max(...chosen.map((m) => m.gpu_memory_mb ?? 0))
+      : null;
   const shortName = (ref: string) => ref.split("/").pop() ?? ref;
-  const modelText =
-    chosen.length === 1 ? shortName(modelRef(chosen[0])) : multiModel || severalModels ? `${chosen.length} models` : "—";
+  const modelText = onOllama
+    ? ollamaModel || "—"
+    : chosen.length === 1
+      ? shortName(modelRef(chosen[0]))
+      : multiModel || severalModels
+        ? `${chosen.length} models`
+        : "—";
   const gb = (mb: number) => `${(mb / 1024).toFixed(1)} GB`;
   const hardware = !onGpu
     ? "CPU"
@@ -294,7 +316,7 @@ export function RunForm({ experiment }: { experiment: string }) {
     : [];
   const canStart =
     system.docker.available &&
-    (byScenario || (multiModel ? modelsChosen.length > 0 : model)) &&
+    (byScenario || (multiModel ? modelsChosen.length > 0 : onOllama ? ollamaModel : model)) &&
     variantsOk &&
     promptsOk &&
     !starting &&
@@ -325,15 +347,54 @@ export function RunForm({ experiment }: { experiment: string }) {
             description={
               multiModel
                 ? `Models downloaded on this machine, smallest first. Pick up to ${MAX_VARIANTS}: every one gets the same prompts, so the model is the only thing that changes.`
-                : "Models downloaded on this machine."
+                : onOllama
+                  ? "Ollama models downloaded on this machine, served by Ollama instead of the app's own server."
+                  : "Models downloaded on this machine."
             }
             action={
-              <ButtonLink href="/settings#models" variant="secondary" size="sm">
+              <ButtonLink href={onOllama ? "/settings#ollama-models" : "/settings#models"} variant="secondary" size="sm">
                 Download more
               </ButtonLink>
             }
           >
-            {models.length > 0 ? (
+            {picksProvider && (
+              <div className="mb-4 flex flex-wrap items-center gap-3">
+                <span className="text-xs font-medium text-ink-2">Provider</span>
+                <Segmented
+                  value={provider}
+                  onChange={setProvider}
+                  options={[
+                    { value: "transformers", label: "Hugging Face" },
+                    { value: "ollama", label: "Ollama" },
+                  ]}
+                />
+                <span className="text-xs text-ink-3">
+                  {onOllama
+                    ? "Ollama serves the model. Same prompts, network and capture."
+                    : "The app's own server loads the model with transformers, as in the original experiment."}
+                </span>
+              </div>
+            )}
+            {onOllama ? (
+              ollamaModels.length > 0 ? (
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {ollamaModels.map((m) => (
+                    <SelectCard key={m.model} selected={ollamaModel === m.model} onClick={() => setOllamaModel(m.model)}>
+                      <div className="truncate pr-6 text-sm font-medium">{m.model}</div>
+                      <div className="mt-0.5 truncate text-xs text-ink-3">Ollama · {formatBytes(m.size_bytes)}</div>
+                    </SelectCard>
+                  ))}
+                </div>
+              ) : (
+                <Alert tone="warning">
+                  No Ollama models downloaded yet.{" "}
+                  <Link href="/settings#ollama-models" className="font-medium text-ink underline">
+                    Download one in Settings
+                  </Link>
+                  .
+                </Alert>
+              )
+            ) : models.length > 0 ? (
               <div className="grid gap-2 sm:grid-cols-2">
                 {models.map((m) => {
                   const ref = modelRef(m);
@@ -804,6 +865,7 @@ export function RunForm({ experiment }: { experiment: string }) {
           <dl className="divide-y divide-[var(--hairline)] px-5 text-sm">
             {[
               [multiModel || severalModels ? "Models" : "Model", modelText],
+              ...(onOllama ? [["Provider", "Ollama"]] : []),
               ...(byScenario ? [["Scenarios", `${scenarios.length}`]] : []),
               ...(experiment === "temperature-change"
                 ? [["Temperatures", temperatures.length ? temperatures.join(", ") : "—"]]
@@ -841,7 +903,7 @@ export function RunForm({ experiment }: { experiment: string }) {
                     : multiModel
                       ? "e.g. 7B models"
                       : model
-                        ? `${shortName(model)} ${sweepsTemperature ? "temperature sweep" : experiment === "delay" ? "under delay" : ownPrompts ? "crafted prompts" : "baseline"}`
+                        ? `${shortName(onOllama && ollamaModel ? ollamaModel : model)} ${sweepsTemperature ? "temperature sweep" : experiment === "delay" ? "under delay" : ownPrompts ? "crafted prompts" : "baseline"}`
                         : "e.g. Qwen baseline"
                 }
                 className={inputClass}

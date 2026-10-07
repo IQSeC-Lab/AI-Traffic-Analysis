@@ -1,0 +1,24 @@
+openai_api_key: "ollama-local-no-key-needed"
+system_prompt_path: marble/agent/werewolf_prompts/system_prompt.yaml
+roles:
+  - wolf
+  - wolf
+  - wolf
+  - villager
+  - villager
+  - villager
+  - seer
+  - witch
+  - guard
+randomize_roles: True
+use_random_names: True
+villager_config:
+  base_url: "https://127.0.0.1:11443/v1"
+  api_key: "ollama-local-no-key-needed"
+  model_name: "llama3.2:3b"
+werewolf_config:
+  base_url: "https://127.0.0.1:11443/v1"
+  api_key: "ollama-local-no-key-needed"
+  model_name: "llama3.2:3b"
+cooperation_mode: "cooperative"
+use_daily_tasks: True

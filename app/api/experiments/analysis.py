@@ -225,8 +225,9 @@ def build_record(pcap: Path, result_file: Path, index: int) -> dict:
     return record
 
 
-def capture_record(run_dir: Path, stem: str, index: int) -> dict:
-    """The capture's record, from the cache when the PCAP hasn't changed since."""
+def capture_record(run_dir: Path, stem: str, index: int, build=None) -> dict:
+    """The capture's record, from the cache when the PCAP hasn't changed since. `build` makes
+    the record of another kind of capture (marble_analysis.py); it takes what build_record does."""
     pcap = run_dir / "captures" / f"{stem}.pcap"
     result_file = run_dir / "results" / f"{stem}.json"
     cache = run_dir / "analysis" / f"{stem}.json"
@@ -238,7 +239,7 @@ def capture_record(run_dir: Path, stem: str, index: int) -> dict:
     except (OSError, ValueError):
         pass
     try:
-        record = build_record(pcap, result_file, index)
+        record = (build or build_record)(pcap, result_file, index)
     except (OSError, ValueError, struct.error) as e:
         prompt, iteration, category = _identity(run_dir, index, {})
         record = {"version": CACHE_VERSION, "index": index, "prompt": prompt, "iteration": iteration,
@@ -318,12 +319,12 @@ def _summarize(records: list[dict]) -> dict:
     }
 
 
-def _by_category(records: list[dict]) -> list[dict]:
+def _by_category(records: list[dict], summarize=_summarize) -> list[dict]:
     # Library order (built-in categories first), then categories no longer in the library
     present = list(dict.fromkeys(r["category"] for r in records))
     order = [c["name"] for c in prompt_library.categories() if c["name"] in present]
     return [
-        {"category": name, **_summarize([r for r in records if r["category"] == name])}
+        {"category": name, **summarize([r for r in records if r["category"] == name])}
         for name in order + [c for c in present if c not in order]
     ]
 
@@ -338,11 +339,21 @@ def _distributions(records: list[dict]) -> tuple[Counter, list[int]]:
     return sizes, gap_hist
 
 
-def run_aggregate(run_id: str, run_dir: Path, variants: list[Variant]) -> dict:
-    """The run's records and summaries: over all its captures, and per variant (`groups`)."""
+def _mtime_ns(path: Path) -> int:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return 0
+
+
+def run_aggregate(run_id: str, run_dir: Path, variants: list[Variant], build=None, summarize=_summarize) -> dict:
+    """The run's records and summaries: over all its captures, and per variant (`groups`).
+    `build` and `summarize` replace build_record and the summary of a group of records."""
     captures = _captures(run_dir, variants)
     pcaps = [run_dir / "captures" / f"{stem}.pcap" for stem, _, _ in captures]
-    key = (len(pcaps), max((p.stat().st_mtime_ns for p in pcaps), default=0))
+    # A capture's result can be saved after its last packet, so it counts as a change too
+    results = [run_dir / "results" / f"{stem}.json" for stem, _, _ in captures]
+    key = (len(pcaps), max((p.stat().st_mtime_ns for p in pcaps), default=0), max(map(_mtime_ns, results), default=0))
     with _aggregate_lock:
         cached = _aggregate_cache.get(run_id)
         if cached and cached[0] == key:
@@ -350,7 +361,7 @@ def run_aggregate(run_id: str, run_dir: Path, variants: list[Variant]) -> dict:
 
     records = []
     for stem, index, variant in captures:
-        record = capture_record(run_dir, stem, index)
+        record = capture_record(run_dir, stem, index, build)
         records.append({**record, "key": stem, "variant": variant})
     sizes, gap_hist = _distributions(records)
 
@@ -361,15 +372,15 @@ def run_aggregate(run_id: str, run_dir: Path, variants: list[Variant]) -> dict:
         groups.append({
             "key": variant.key,
             "label": variant.label,
-            "summary": _summarize(mine),
-            "by_category": _by_category(mine),
+            "summary": summarize(mine),
+            "by_category": _by_category(mine, summarize),
             "size_counts": group_sizes,
             "gap_hist": group_gaps,
         })
 
     aggregate = {
-        "summary": _summarize(records),
-        "by_category": _by_category(records),
+        "summary": summarize(records),
+        "by_category": _by_category(records, summarize),
         "groups": groups,
         "size_counts": sizes,
         "gap_hist": gap_hist,

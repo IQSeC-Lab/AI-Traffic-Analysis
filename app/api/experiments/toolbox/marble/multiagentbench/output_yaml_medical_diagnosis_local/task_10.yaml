@@ -1,0 +1,109 @@
+scenario: medical_diagnosis
+task_id: 10
+agents:
+- agent_id: agent1
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are a physician on a diagnostic team. Your assigned candidate answer
+    to argue for is: "It is a Southwestern blot, identifying the presence of DNA-binding
+    proteins". Evaluate whether the clinical evidence in the case supports this option,
+    and be willing to change your position if the evidence points elsewhere.'
+- agent_id: agent2
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are a physician on a diagnostic team. Your assigned candidate answer
+    to argue for is: "It is a Northern blot, identifying the presence of RNA". Evaluate
+    whether the clinical evidence in the case supports this option, and be willing
+    to change your position if the evidence points elsewhere.'
+- agent_id: agent3
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are a physician on a diagnostic team. Your assigned candidate answer
+    to argue for is: "It is a Northern blot, identifying the presence of DNA". Evaluate
+    whether the clinical evidence in the case supports this option, and be willing
+    to change your position if the evidence points elsewhere.'
+- agent_id: agent4
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are a physician on a diagnostic team. Your assigned candidate answer
+    to argue for is: "It is an HIV-1/HIV2 antibody differentiation immunoassay". Evaluate
+    whether the clinical evidence in the case supports this option, and be willing
+    to change your position if the evidence points elsewhere.'
+coordinate_mode: graph
+engine_planner:
+  initial_progress: Starting clinical case discussion.
+environment:
+  max_iterations: 5
+  name: Medical Diagnosis Coordination Environment
+  type: Base
+llm: ollama/llama3.2:3b
+memory:
+  type: BaseMemory
+metrics:
+  evaluate_llm: ollama/llama3.2:3b
+  engagement_level: true
+  relevance: true
+output:
+  file_path: result/medical_diagnosis_output.jsonl
+  format: jsonl
+relationships:
+- - agent1
+  - agent2
+  - collaborate with
+- - agent1
+  - agent3
+  - collaborate with
+- - agent1
+  - agent4
+  - collaborate with
+- - agent2
+  - agent3
+  - collaborate with
+- - agent2
+  - agent4
+  - collaborate with
+- - agent3
+  - agent4
+  - collaborate with
+task:
+  content: '
+
+    A team of physicians is evaluating the following real clinical case:
+
+
+    **Case**
+
+
+    A 24-year-old G2P1 woman at 39 weeks’ gestation presents to the emergency department
+    complaining of painful contractions occurring every 10 minutes for the past 2
+    hours, consistent with latent labor. She says she has not experienced vaginal
+    discharge, bleeding, or fluid leakage, and is currently taking no medications.
+    On physical examination, her blood pressure is 110/70 mm Hg, heart rate is 86/min,
+    and temperature is 37.6°C (99.7°F). She has had little prenatal care and uses
+    condoms inconsistently. Her sexually transmitted infections status is unknown.
+    As part of the patient’s workup, she undergoes a series of rapid screening tests
+    that result in the administration of zidovudine during delivery. The infant is
+    also given zidovudine to reduce the risk of transmission. A confirmatory test
+    is then performed in the mother to confirm the diagnosis of HIV. Which of the
+    following is most true about the confirmatory test?
+
+
+    Each physician on the team will argue for a different candidate answer.
+
+    Discuss the evidence for and against each option, challenge each other''s
+
+    reasoning, and converge on the single best-supported answer.
+
+    '
+  output_format: 'Respond in this format:
+
+    **[Your Position]**
+
+    Which option you are arguing for or evaluating this turn.
+
+
+    **[Clinical Reasoning]**
+
+    The evidence from the case that supports or refutes this option.
+
+    '

@@ -1,0 +1,141 @@
+scenario: bugfix
+task_id: 4
+agents:
+- agent_id: agent1
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: "You are the Planner. You have the full technical specification below,\
+    \ including the exact bug and the required fix. Relay the necessary details to\
+    \ the Executor -- you cannot edit code yourself.\n\n# GH11: Middleware Error Handler\
+    \ Ordering — Full Specification\n\n## Issue\n\nError handler middleware registered\
+    \ with `app.use_error_handler(handler)` only catches\nexceptions from the immediately\
+    \ next middleware in the pipeline, not from the entire\ndownstream chain. Errors\
+    \ from handlers registered two or more positions after the error\nhandler slip\
+    \ through uncaught.\n\n## Concrete Example\n\n```python\napp = App()\napp.use(logging_middleware)\
+    \       # position 1\napp.use_error_handler(error_mw)   # position 2 — should\
+    \ catch errors from 3, 4, 5\napp.use(auth_middleware)          # position 3\n\
+    app.use(rate_limiter)             # position 4\napp.use(route_handler)       \
+    \     # position 5 — raises ValueError(\"not found\")\n```\n\nWith the buggy implementation\
+    \ the `ValueError` from step 5 is **NOT** caught by\n`error_mw` at step 2. It\
+    \ propagates all the way out of the pipeline unhandled.\n\n## Root Cause\n\nIn\
+    \ `Pipeline.execute(request)`, middleware is executed as a flat loop. When the\n\
+    pipeline encounters an error handler it tries/catches only around the single next\n\
+    middleware call:\n\n```python\nfor i, mw in enumerate(self._middlewares):\n  \
+    \  if mw.is_error_handler:\n        try:\n            result = self._middlewares[i\
+    \ + 1].func(request, response)\n        except Exception as e:\n            result\
+    \ = mw.func(request, response, e)\n        skip_next = True   # skips only one\
+    \ entry\n    else:\n        result = mw.func(request, response)\n```\n\nBecause\
+    \ the `try/except` wraps only `pipeline[i+1]`, any exception raised by\n`pipeline[i+2]`,\
+    \ `pipeline[i+3]`, … is never intercepted by the error handler.\n\n## The Fix\n\
+    \nChange the pipeline execution from a flat loop to a **recursive chain** (or\
+    \ an\nexplicit nested-closure stack). Each error handler must wrap\n`execute_remaining(pipeline[i+1:])`\
+    \ — the entire suffix of the pipeline — so that\nany downstream error bubbles\
+    \ up to it.\n\nA correct recursive approach:\n\n```python\ndef _run(self, middlewares,\
+    \ request, response):\n    if not middlewares:\n        return response\n    mw\
+    \ = middlewares[0]\n    rest = middlewares[1:]\n    if mw.is_error_handler:\n\
+    \        try:\n            return self._run(rest, request, response)\n       \
+    \ except Exception as e:\n            return mw.func(request, response, e)\n \
+    \   else:\n        result = mw.func(request, response)\n        if result is not\
+    \ None:\n            return result\n        return self._run(rest, request, response)\n\
+    ```\n\n## Constraints\n\n- **Normal (non-error) middleware execution order must\
+    \ remain the same** (FIFO,\n  registration order).\n- **`Request` and `Response`\
+    \ classes are correct** — do not change them.\n- **Middleware registration order\
+    \ must be respected** — `add()` / `add_error_handler()`\n  append to the same\
+    \ ordered list.\n- Error handlers accept three arguments: `(request, response,\
+    \ exception)`.\n- Normal middleware accepts two arguments: `(request, response)`.\n\
+    - If a middleware or error handler returns a `Response` object, that terminates\
+    \ the\n  chain (short-circuit).\n- If no error handler catches a propagating exception,\
+    \ the exception escapes the\n  pipeline."
+- agent_id: agent2
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are the Executor. You only know the high-level problem below. You
+    must ask the Planner for the specific fix details before proposing any code change
+    -- do not guess at implementation details you were not given.
+
+
+    # GH11: Fix Middleware Error Handler Ordering
+
+
+    The web framework''s middleware pipeline has a bug where error-handling
+
+    middleware doesn''t catch errors from all downstream handlers. Errors
+
+    from handlers registered after the error handler slip through uncaught.
+
+
+    Fix the middleware pipeline in `middleware.py`.'
+- agent_id: agent3
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: You are the Verifier. Once the Executor proposes a fix, check it against
+    the Planner's stated requirements and report whether it looks correct, complete,
+    and doesn't break the stated invariants.
+coordinate_mode: graph
+engine_planner:
+  initial_progress: Starting bug-fix coordination for GH11_middleware_order.
+environment:
+  max_iterations: 5
+  name: Bugfix Coordination Environment
+  type: Base
+llm: ollama/llama3.2:3b
+memory:
+  type: BaseMemory
+metrics:
+  evaluate_llm: ollama/llama3.2:3b
+  engagement_level: true
+  relevance: true
+output:
+  file_path: result/bugfix_output.jsonl
+  format: jsonl
+relationships:
+- - agent1
+  - agent2
+  - collaborate with
+- - agent1
+  - agent3
+  - collaborate with
+- - agent2
+  - agent3
+  - collaborate with
+task:
+  content: '
+
+    You are a 3-agent team fixing a real software bug from an open-source project.
+
+    agent1 is the Planner: they have the full technical specification of the bug
+
+    and required fix, but cannot edit any code themselves. agent2 is the Executor:
+
+    they only know the high-level problem statement and must ask the Planner for
+
+    the specific details needed to implement the fix -- they should not guess.
+
+    agent3 is the Verifier: once a fix is proposed, they check it against the
+
+    requirements and report whether it looks correct and complete.
+
+
+    Work together: the Planner should relay every specific requirement to the
+
+    Executor, the Executor should propose the concrete code change, and the
+
+    Verifier should give a final assessment of whether the fix satisfies the
+
+    specification.
+
+    '
+  output_format: 'Respond in this format:
+
+    **[Role and Action]**
+
+    State your role (Planner/Executor/Verifier) and what you are doing this turn.
+
+
+    **[Content]**
+
+    Your actual contribution: the Planner explains requirements, the Executor
+
+    proposes a concrete fix, the Verifier checks the fix against requirements.
+
+    '

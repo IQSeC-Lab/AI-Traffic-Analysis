@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import type { Analytics, CategoryStats } from "@/lib/api";
+import type { Histogram as HistogramData } from "@/lib/api";
 import { formatBytes, formatMs, formatNumber, formatPercent } from "@/lib/format";
 import { BarList } from "@/components/charts/BarList";
 import { ChartCard } from "@/components/charts/ChartCard";
@@ -23,9 +23,19 @@ const CATEGORY_SHORT: Record<string, string> = {
   "Technical Explanation": "Technical",
 };
 
-type MetricKey = Exclude<keyof CategoryStats, "category" | "captures" | "total_bytes">;
+/** A median the charts can show: a key of a group's summary (and of its categories'). */
+export type Metric = { key: string; label: string; format: (v: number) => string };
 
-const METRICS: { key: MetricKey; label: string; format: (v: number) => string }[] = [
+// What every chart reads. A run's analytics (Analytics, AgenticAnalytics) fit it as they are.
+type Stats = Record<string, number | string | null | undefined>;
+type ChartData = {
+  groups: { key: string; label: string; summary: Stats; by_category: Stats[] }[];
+  gap_hist: HistogramData;
+  size_hist: HistogramData;
+};
+const num = (v: Stats[string]) => (typeof v === "number" ? v : null);
+
+const METRICS: Metric[] = [
   { key: "median_ttft_ms", label: "First event", format: formatMs },
   { key: "median_events_per_s", label: "Events/s", format: (v) => `${formatNumber(v)}/s` },
   { key: "median_gap_ms", label: "Packet gap", format: formatMs },
@@ -35,7 +45,7 @@ const METRICS: { key: MetricKey; label: string; format: (v: number) => string }[
   { key: "median_duration_s", label: "Generation", format: (v) => `${formatNumber(v)} s` },
 ];
 
-type TileProps = { data: Analytics; series: Series[]; height?: number; className?: string };
+type TileProps = { data: ChartData; series: Series[]; height?: number; className?: string };
 
 const share = (values: number[]) => {
   const total = values.reduce((a, b) => a + b, 0);
@@ -45,20 +55,27 @@ const share = (values: number[]) => {
 const binLabel = (edges: number[], i: number, f: (v: number) => string) => `${f(edges[i])} – ${f(edges[i + 1])}`;
 
 /** The groups in `data` that have a series, in series order, each with its series. */
-function seriesGroups(data: Analytics, series: Series[]) {
+function seriesGroups(data: ChartData, series: Series[]) {
   const byKey = new Map(data.groups.map((g) => [g.key, g]));
   return series.filter((s) => byKey.has(s.id)).map((s) => ({ group: byKey.get(s.id)!, series: s }));
 }
 
-export function GapChart({ data, series, height = 240, className }: TileProps) {
+export function GapChart({
+  data,
+  series,
+  height = 240,
+  className,
+  title = "Time between stream packets",
+  subtitle = "Server → client packets of the response stream · share of gaps, log scale",
+}: TileProps & { title?: string; subtitle?: string }) {
   const gapSeries = seriesGroups(data, series).map(({ group, series: s }) => ({
     ...s,
     values: share(data.gap_hist.series[group.key] ?? []),
   }));
   return (
     <ChartCard
-      title="Time between stream packets"
-      subtitle="Server → client packets of the response stream · share of gaps, log scale"
+      title={title}
+      subtitle={subtitle}
       legend={gapSeries}
       height={height}
       className={className}
@@ -87,14 +104,21 @@ export function GapChart({ data, series, height = 240, className }: TileProps) {
   );
 }
 
-export function SizeChart({ data, series, height = 240, className }: TileProps) {
+export function SizeChart({
+  data,
+  series,
+  height = 240,
+  className,
+  title = "Stream packet sizes",
+  subtitle = "TCP payload of each server → client packet · share of packets",
+}: TileProps & { title?: string; subtitle?: string }) {
   const groups = seriesGroups(data, series);
   const sizeSeries = groups.map(({ group, series: s }) => ({ ...s, values: share(data.size_hist.series[group.key] ?? []) }));
   const outside = groups.reduce((a, { group }) => a + (data.size_hist.outside?.[group.key] ?? 0), 0);
   return (
     <ChartCard
-      title="Stream packet sizes"
-      subtitle="TCP payload of each server → client packet · share of packets"
+      title={title}
+      subtitle={subtitle}
       legend={sizeSeries}
       height={height}
       className={className}
@@ -123,19 +147,30 @@ export function SizeChart({ data, series, height = 240, className }: TileProps) 
   );
 }
 
-/** Medians per prompt category. With `byPrompt`, the categories are the run's own prompts ("Prompt 1", ...). */
-export function CategoryChart({ data, series, height = 240, className, byPrompt = false }: TileProps & { byPrompt?: boolean }) {
-  const [metric, setMetric] = useState<MetricKey>("median_ttft_ms");
+/**
+ * Medians per prompt category. With `byPrompt`, the categories are the run's own prompts ("Prompt 1", ...).
+ * `metrics` and `unit` are for runs measured differently: an agentic run's task categories.
+ */
+export function CategoryChart({
+  data,
+  series,
+  height = 240,
+  className,
+  byPrompt = false,
+  metrics = METRICS,
+  unit = "prompt category",
+}: TileProps & { byPrompt?: boolean; metrics?: Metric[]; unit?: string }) {
+  const [metric, setMetric] = useState(metrics[0].key);
   const groups = seriesGroups(data, series);
-  const categories = [...new Set(groups.flatMap(({ group }) => group.by_category.map((c) => c.category)))];
-  const m = METRICS.find((x) => x.key === metric)!;
+  const categories = [...new Set(groups.flatMap(({ group }) => group.by_category.map((c) => String(c.category))))];
+  const m = metrics.find((x) => x.key === metric)!;
   const categorySeries = groups.map(({ group, series: s }) => ({
     ...s,
-    values: categories.map((c) => group.by_category.find((x) => x.category === c)?.[metric] ?? null),
+    values: categories.map((c) => num(group.by_category.find((x) => x.category === c)?.[metric])),
   }));
   return (
     <ChartCard
-      title={byPrompt ? "By prompt" : "By prompt category"}
+      title={byPrompt ? "By prompt" : `By ${unit}`}
       subtitle={`Median ${m.label.toLowerCase()} per ${byPrompt ? "prompt" : "category"}`}
       legend={categorySeries}
       legendShape="rect"
@@ -144,11 +179,11 @@ export function CategoryChart({ data, series, height = 240, className, byPrompt 
       controls={
         <select
           value={metric}
-          onChange={(e) => setMetric(e.target.value as MetricKey)}
+          onChange={(e) => setMetric(e.target.value)}
           className="h-7 rounded-lg border border-hairline bg-surface px-2 text-xs font-medium outline-none"
           aria-label="Metric"
         >
-          {METRICS.map((x) => (
+          {metrics.map((x) => (
             <option key={x.key} value={x.key}>
               {x.label}
             </option>
@@ -167,7 +202,7 @@ export function CategoryChart({ data, series, height = 240, className, byPrompt 
           series={categorySeries}
           height={height}
           format={m.format}
-          ariaLabel={`Median ${m.label} by ${byPrompt ? "prompt" : "prompt category"}`}
+          ariaLabel={`Median ${m.label} by ${byPrompt ? "prompt" : unit}`}
         />
       ) : (
         <NoData height={height} text="No client timing for this metric. Runs record it from now on." />
@@ -183,10 +218,11 @@ export function CompareChart({
   variable,
   height = 200,
   className,
-}: TileProps & { variable: string }) {
-  const [metric, setMetric] = useState<MetricKey>("median_ttft_ms");
+  metrics = METRICS,
+}: TileProps & { variable: string; metrics?: Metric[] }) {
+  const [metric, setMetric] = useState(metrics[0].key);
   const groups = seriesGroups(data, series);
-  const m = METRICS.find((x) => x.key === metric)!;
+  const m = metrics.find((x) => x.key === metric)!;
   const noun = variable[0].toUpperCase() + variable.slice(1);
   return (
     <ChartCard
@@ -197,11 +233,11 @@ export function CompareChart({
       controls={
         <select
           value={metric}
-          onChange={(e) => setMetric(e.target.value as MetricKey)}
+          onChange={(e) => setMetric(e.target.value)}
           className="h-7 rounded-lg border border-hairline bg-surface px-2 text-xs font-medium outline-none"
           aria-label="Metric"
         >
-          {METRICS.map((x) => (
+          {metrics.map((x) => (
             <option key={x.key} value={x.key}>
               {x.label}
             </option>
@@ -209,17 +245,17 @@ export function CompareChart({
         </select>
       }
       table={{
-        columns: [noun, "Captures", ...METRICS.map((x) => x.label)],
+        columns: [noun, "Captures", ...metrics.map((x) => x.label)],
         rows: groups.map(({ group, series: s }) => [
           s.label,
           group.summary.captures,
-          ...METRICS.map((x) => (group.summary[x.key] == null ? "—" : x.format(group.summary[x.key]!))),
+          ...metrics.map((x) => (num(group.summary[x.key]) == null ? "—" : x.format(num(group.summary[x.key])!))),
         ]),
       }}
     >
-      {groups.some(({ group }) => group.summary[metric] != null) ? (
+      {groups.some(({ group }) => num(group.summary[metric]) != null) ? (
         <BarList
-          rows={groups.map(({ group, series: s }) => ({ ...s, value: group.summary[metric], note: `${group.summary.captures} captures` }))}
+          rows={groups.map(({ group, series: s }) => ({ ...s, value: num(group.summary[metric]), note: `${group.summary.captures} captures` }))}
           format={m.format}
           height={height}
           ariaLabel={`Median ${m.label} per ${variable}`}

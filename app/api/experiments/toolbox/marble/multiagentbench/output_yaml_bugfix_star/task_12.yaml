@@ -1,0 +1,137 @@
+scenario: bugfix
+task_id: 12
+agents:
+- agent_id: agent1
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: "You are the Planner. You have the full technical specification below,\
+    \ including the exact bug and the required fix. Relay the necessary details to\
+    \ the Executor -- you cannot edit code yourself.\n\n# GH14: Chain-of-Groups Failure\
+    \ Propagation\n\n## Goal\n\nFix `pipeline.py` so failures in any pipeline stage\
+    \ propagate as exceptions\nrather than being silently converted to error dicts\
+    \ and passed to subsequent\nstages.\n\n## Requirements\n\n1. `pipeline.run([\"\
+    POISON_PILL\"])` (or `CORRUPT_IMAGE` / `INVALID_DATA`) must\n   raise `StageError`\
+    \ (or a subclass of `Exception`)\n2. A mix of good and bad items must also raise\
+    \ when any item fails\n3. A list of only good items must return all-ok result\
+    \ dicts\n4. All tests in `test_pipeline.py` pass: `pytest test_pipeline.py -v`\n\
+    \n## Supporting Documents\n\n- `pipeline.py` — contains the buggy `_run_group()`\
+    \ and `_chain_groups()`\n- `tasks.py` — individual stage functions (correct, do\
+    \ not modify)\n- `test_pipeline.py` — tests\n\n## Contradiction / Hidden Complexity\n\
+    \nThis mirrors Celery's chain-of-groups bug: when Celery converts a\n`group |\
+    \ chain` into internal chords, intermediate chord failures are not\nautomatically\
+    \ propagated to subsequent chord callbacks. The naive fix of just\nre-raising\
+    \ in `_run_group` will break the concurrent fanout semantics; the\ncorrect fix\
+    \ is to inspect results after each stage and raise if any error\ndicts are present.\n\
+    \n## Important Notes\n\n- Fix is in `pipeline.py` — `_run_group` and/or `_chain_groups`\n\
+    - Do NOT modify `tasks.py` or `test_pipeline.py`\n- Add a helper that checks for\
+    \ error dicts and raises `StageError`"
+- agent_id: agent2
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are the Executor. You only know the high-level problem below. You
+    must ask the Planner for the specific fix details before proposing any code change
+    -- do not guess at implementation details you were not given.
+
+
+    # GH14: Pipeline Failure Propagation (Brief)
+
+
+    Fix the pipeline so failures in any stage propagate correctly rather than
+
+    being silently swallowed.
+
+
+    Currently a bad item in stage 1 causes no visible error — the pipeline
+
+    returns as if it succeeded.
+
+
+    Verify with:
+
+    ```
+
+    pytest test_pipeline.py -v
+
+    ```
+
+
+    **Files to fix:** `pipeline.py`
+
+    **Do NOT modify:** `tasks.py` or `test_pipeline.py`
+
+
+    Follow the Planner''s guidance precisely.'
+- agent_id: agent3
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: You are the Verifier. Once the Executor proposes a fix, check it against
+    the Planner's stated requirements and report whether it looks correct, complete,
+    and doesn't break the stated invariants.
+coordinate_mode: star
+engine_planner:
+  initial_progress: Starting bug-fix coordination for GH14_celery_chain_fail.
+environment:
+  max_iterations: 5
+  name: Bugfix Coordination Environment
+  type: Base
+llm: ollama/llama3.2:3b
+memory:
+  type: BaseMemory
+metrics:
+  evaluate_llm: ollama/llama3.2:3b
+  engagement_level: true
+  relevance: true
+output:
+  file_path: result/bugfix_output.jsonl
+  format: jsonl
+relationships:
+- - agent1
+  - agent2
+  - collaborate with
+- - agent1
+  - agent3
+  - collaborate with
+- - agent2
+  - agent3
+  - collaborate with
+task:
+  content: '
+
+    You are a 3-agent team fixing a real software bug from an open-source project.
+
+    agent1 is the Planner: they have the full technical specification of the bug
+
+    and required fix, but cannot edit any code themselves. agent2 is the Executor:
+
+    they only know the high-level problem statement and must ask the Planner for
+
+    the specific details needed to implement the fix -- they should not guess.
+
+    agent3 is the Verifier: once a fix is proposed, they check it against the
+
+    requirements and report whether it looks correct and complete.
+
+
+    Work together: the Planner should relay every specific requirement to the
+
+    Executor, the Executor should propose the concrete code change, and the
+
+    Verifier should give a final assessment of whether the fix satisfies the
+
+    specification.
+
+    '
+  output_format: 'Respond in this format:
+
+    **[Role and Action]**
+
+    State your role (Planner/Executor/Verifier) and what you are doing this turn.
+
+
+    **[Content]**
+
+    Your actual contribution: the Planner explains requirements, the Executor
+
+    proposes a concrete fix, the Verifier checks the fix against requirements.
+
+    '

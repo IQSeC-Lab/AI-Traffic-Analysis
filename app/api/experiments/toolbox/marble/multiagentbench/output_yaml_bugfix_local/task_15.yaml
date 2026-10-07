@@ -1,0 +1,129 @@
+scenario: bugfix
+task_id: 15
+agents:
+- agent_id: agent1
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: "You are the Planner. You have the full technical specification below,\
+    \ including the exact bug and the required fix. Relay the necessary details to\
+    \ the Executor -- you cannot edit code yourself.\n\n# Specification: GH7 Fixture\
+    \ Scope Leak\n\n## Issue\n\n`@fixture(scope=\"session\")` returning a mutable\
+    \ object (e.g., `[]` or `{}`) leaks\nmutations between test modules. Module A\
+    \ appends to the list; Module B sees the\nappended items. This mirrors a real\
+    \ pytest fixture isolation issue.\n\n## Root Cause\n\nIn `FixtureManager.get_fixture(name,\
+    \ scope_key)`, session-scoped fixtures are cached\nby fixture name only. When\
+    \ the fixture factory returns a mutable object, the **same\nobject reference**\
+    \ is returned to every requestor across all modules. The cache stores\n`{name:\
+    \ value}` but should either:\n\n1. Store the factory and re-invoke it per module-scope\
+    \ request, OR\n2. Return `copy.deepcopy(cached_value)` for each call while keeping\
+    \ the canonical\n   copy in the cache.\n\nOption 2 (deep-copy on return) is the\
+    \ minimal fix because it requires changing only\nthe return path inside `get_fixture()`.\n\
+    \n## The Fix\n\nIn `get_fixture()`, after retrieving a cached session-scoped value,\
+    \ return a deep copy\nof that value rather than the cached reference directly:\n\
+    \n```python\nimport copy\n# inside get_fixture, when serving a cached session\
+    \ fixture:\nreturn copy.deepcopy(self._cache[\"session\"][name])\n```\n\nThe canonical\
+    \ cached value is never mutated by callers, so subsequent calls always\ndeep-copy\
+    \ from the original.\n\n## Constraints\n\n- **Function-scoped fixtures already\
+    \ work correctly** (re-invoked per test via\n  `clear_scope(\"function\")`). Do\
+    \ not change this behavior.\n- **Module-scoped fixtures already work correctly**\
+    \ (cleared between modules via\n  `clear_scope(\"module\")`). Do not change this\
+    \ behavior.\n- **Session-scoped fixtures with immutable values** (strings, ints,\
+    \ tuples) must\n  still be cached efficiently. `copy.deepcopy` is safe and correct\
+    \ for these types;\n  it returns equal values and the factory is still called\
+    \ only once.\n- **The test discovery and test runner logic are correct** and must\
+    \ not be changed.\n- **`FixtureManager` class must remain present** with its public\
+    \ interface intact.\n\n## Affected Files\n\nOnly `test_framework.py` needs to\
+    \ be modified. The change is approximately 1–3 lines\ninside `FixtureManager.get_fixture()`."
+- agent_id: agent2
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are the Executor. You only know the high-level problem below. You
+    must ask the Planner for the specific fix details before proposing any code change
+    -- do not guess at implementation details you were not given.
+
+
+    # GH7: Fix Fixture State Isolation Between Test Modules
+
+
+    The test framework has a bug where session-scoped fixtures leak mutable
+
+    state between test modules. Tests that pass in isolation fail when run
+
+    together because fixture state accumulates across modules.
+
+
+    Fix the fixture manager in `test_framework.py`.'
+- agent_id: agent3
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: You are the Verifier. Once the Executor proposes a fix, check it against
+    the Planner's stated requirements and report whether it looks correct, complete,
+    and doesn't break the stated invariants.
+coordinate_mode: graph
+engine_planner:
+  initial_progress: Starting bug-fix coordination for GH7_fixture_scope_leak.
+environment:
+  max_iterations: 5
+  name: Bugfix Coordination Environment
+  type: Base
+llm: ollama/llama3.2:3b
+memory:
+  type: BaseMemory
+metrics:
+  evaluate_llm: ollama/llama3.2:3b
+  engagement_level: true
+  relevance: true
+output:
+  file_path: result/bugfix_output.jsonl
+  format: jsonl
+relationships:
+- - agent1
+  - agent2
+  - collaborate with
+- - agent1
+  - agent3
+  - collaborate with
+- - agent2
+  - agent3
+  - collaborate with
+task:
+  content: '
+
+    You are a 3-agent team fixing a real software bug from an open-source project.
+
+    agent1 is the Planner: they have the full technical specification of the bug
+
+    and required fix, but cannot edit any code themselves. agent2 is the Executor:
+
+    they only know the high-level problem statement and must ask the Planner for
+
+    the specific details needed to implement the fix -- they should not guess.
+
+    agent3 is the Verifier: once a fix is proposed, they check it against the
+
+    requirements and report whether it looks correct and complete.
+
+
+    Work together: the Planner should relay every specific requirement to the
+
+    Executor, the Executor should propose the concrete code change, and the
+
+    Verifier should give a final assessment of whether the fix satisfies the
+
+    specification.
+
+    '
+  output_format: 'Respond in this format:
+
+    **[Role and Action]**
+
+    State your role (Planner/Executor/Verifier) and what you are doing this turn.
+
+
+    **[Content]**
+
+    Your actual contribution: the Planner explains requirements, the Executor
+
+    proposes a concrete fix, the Verifier checks the fix against requirements.
+
+    '

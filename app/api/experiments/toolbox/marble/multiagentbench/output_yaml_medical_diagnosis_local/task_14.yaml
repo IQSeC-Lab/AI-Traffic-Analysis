@@ -1,0 +1,106 @@
+scenario: medical_diagnosis
+task_id: 14
+agents:
+- agent_id: agent1
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are a physician on a diagnostic team. Your assigned candidate answer
+    to argue for is: "Epstein-Barr virus". Evaluate whether the clinical evidence
+    in the case supports this option, and be willing to change your position if the
+    evidence points elsewhere.'
+- agent_id: agent2
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are a physician on a diagnostic team. Your assigned candidate answer
+    to argue for is: "Human immunodeficiency virus". Evaluate whether the clinical
+    evidence in the case supports this option, and be willing to change your position
+    if the evidence points elsewhere.'
+- agent_id: agent3
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are a physician on a diagnostic team. Your assigned candidate answer
+    to argue for is: "Rotavirus". Evaluate whether the clinical evidence in the case
+    supports this option, and be willing to change your position if the evidence points
+    elsewhere.'
+- agent_id: agent4
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are a physician on a diagnostic team. Your assigned candidate answer
+    to argue for is: "Vaccinia virus". Evaluate whether the clinical evidence in the
+    case supports this option, and be willing to change your position if the evidence
+    points elsewhere.'
+coordinate_mode: graph
+engine_planner:
+  initial_progress: Starting clinical case discussion.
+environment:
+  max_iterations: 5
+  name: Medical Diagnosis Coordination Environment
+  type: Base
+llm: ollama/llama3.2:3b
+memory:
+  type: BaseMemory
+metrics:
+  evaluate_llm: ollama/llama3.2:3b
+  engagement_level: true
+  relevance: true
+output:
+  file_path: result/medical_diagnosis_output.jsonl
+  format: jsonl
+relationships:
+- - agent1
+  - agent2
+  - collaborate with
+- - agent1
+  - agent3
+  - collaborate with
+- - agent1
+  - agent4
+  - collaborate with
+- - agent2
+  - agent3
+  - collaborate with
+- - agent2
+  - agent4
+  - collaborate with
+- - agent3
+  - agent4
+  - collaborate with
+task:
+  content: '
+
+    A team of physicians is evaluating the following real clinical case:
+
+
+    **Case**
+
+
+    A microbiologist is studying the emergence of a virulent strain of the virus.
+    After a detailed study of the virus and its life cycle, he proposes a theory:
+    Initially, a host cell is co-infected with 2 viruses from the same virus family.
+    Within the host cell, concomitant production of various genome segments from both
+    viruses occurs. Ultimately, the different genome segments from the viruses are
+    packaged into a unique and novel virus particle. The newly formed virus particle
+    is both stable and viable and is a new strain from the virus family that caused
+    the outbreak of infection. Which of the following viruses is capable of undergoing
+    the above-mentioned process?
+
+
+    Each physician on the team will argue for a different candidate answer.
+
+    Discuss the evidence for and against each option, challenge each other''s
+
+    reasoning, and converge on the single best-supported answer.
+
+    '
+  output_format: 'Respond in this format:
+
+    **[Your Position]**
+
+    Which option you are arguing for or evaluating this turn.
+
+
+    **[Clinical Reasoning]**
+
+    The evidence from the case that supports or refutes this option.
+
+    '

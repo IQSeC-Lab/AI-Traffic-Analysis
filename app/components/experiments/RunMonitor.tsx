@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check } from "lucide-react";
 
 import { api, isActive, type CurrentCapture, type Run, type RunLogs, type RunWorker } from "@/lib/api";
-import { EXPERIMENTS } from "@/lib/experiments";
+import { EXPERIMENTS, isAgentic } from "@/lib/experiments";
 import { formatBytes, formatDuration, hardwareLabel } from "@/lib/format";
 import { useInterval } from "@/lib/useInterval";
 import { Card, ProgressBar, Spinner, StatTile } from "@/components/ui";
@@ -12,6 +12,8 @@ import { variantColor, variantLabel } from "./RunBadge";
 
 const MAX_LOG_LINES = 2000;
 const PHASES = ["Setup", "Prompts", "Cleanup", "Done"];
+// What a run captures one at a time: a prompt, or in an agentic run a task
+const unitOf = (run: Run) => (isAgentic(run.experiment) ? "task" : "prompt");
 
 function phaseIndex(run: Run) {
   if (run.status === "cleaning_up") return 2;
@@ -60,6 +62,7 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
   const workers = run.workers ?? [];
   const info = EXPERIMENTS.find((e) => e.slug === run.experiment);
   const variable = info?.variable;
+  const unit = unitOf(run);
 
   return (
     <div className="space-y-6">
@@ -120,7 +123,7 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
                     )}
                   </span>
                   <span className={`hidden text-sm sm:block ${state === "todo" ? "text-ink-3" : "font-medium"}`}>
-                    {name}
+                    {i === 1 && unit === "task" ? "Tasks" : name}
                   </span>
                 </li>
               );
@@ -157,14 +160,18 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
                 : undefined
             }
           />
-          <StatTile label="Max tokens" value={run.config.max_tokens.toLocaleString()} />
+          {unit === "task" ? (
+            <StatTile label="Tasks" value={(run.prompt_count ?? 0).toLocaleString()} hint={run.config.repeat ? `× ${run.config.repeat} repetitions` : undefined} />
+          ) : (
+            <StatTile label="Max tokens" value={run.config.max_tokens.toLocaleString()} />
+          )}
         </div>
 
         {variable && run.variants.length > 0 && (
           <Card
             className="col-span-12"
             title={`Progress by ${variable.one}`}
-            description={`Every prompt is captured once per ${variable.one}. They take turns, so each ${variable.one} advances at the same pace.`}
+            description={`Every ${unit} is captured once per ${variable.one}. They take turns, so each ${variable.one} advances at the same pace.`}
           >
             {/* A scenario's label can name a model, a temperature and a network condition, so its card is wider */}
             <div className={`grid gap-3 ${info?.scenarios ? "grid-cols-2" : "grid-cols-4"}`}>
@@ -198,7 +205,7 @@ export function RunMonitor({ run, now }: { run: Run; now: number }) {
           <Card
             className="col-span-12"
             title="Workers"
-            description="Each worker runs its own copy of the model, with its own network and capture, on its share of the prompts."
+            description={`Each worker runs its own copy of the model, with its own network and capture, on its share of the ${unit}s.`}
           >
             {/* Two columns on wide screens: with workers dealt out over 2 GPUs in turn, each column is one GPU */}
             <div className="grid gap-3 2xl:grid-cols-2">
@@ -287,7 +294,7 @@ function PromptLabel({ current, run }: { current: CurrentCapture; run: Run }) {
     : undefined;
   return (
     <span className="font-medium">
-      Prompt #{String(current.prompt).padStart(2, "0")}
+      {unitOf(run) === "task" ? "Task" : "Prompt"} #{String(current.prompt).padStart(2, "0")}
       {current.iteration != null && ` · iteration ${current.iteration}/${run.config.repeat}`}
       {variant && ` · ${variantLabel(run.experiment, variant)}`}
       <span className="text-ink-3"> · </span>
@@ -326,7 +333,7 @@ function WorkerRow({
           </>
         ) : (
           <span className="truncate text-ink-3">
-            {finished ? "Finished its prompts" : active ? "Waiting for setup" : "Stopped"}
+            {finished ? `Finished its ${unitOf(run)}s` : active ? "Waiting for setup" : "Stopped"}
           </span>
         )}
       </div>

@@ -18,12 +18,16 @@ app/                              # project root
 │       ├── scalability.py        # 5, ported from ../5-Scalability
 │       ├── delay.py              # 6, ported from ../6-Delay
 │       ├── custom_experiment.py  # not in the repo: scenarios with every setting of the others
+│       ├── ollama_engine.py      # the same capture with Ollama as the server (Data Collector's Ollama provider)
+│       ├── topology_transfer.py  # agentic: MARBLE tasks, once per coordination topology
+│       ├── marble_engine.py      # how an agentic run captures a task
+│       ├── marble_analysis.py    # analytics of the agentic runs (the dataset's measurements, the heatmap)
 │       ├── engine.py             # runs, workers, the shared queue + Docker cleanup
 │       ├── scheduler.py          # which GPU a run's workers go to, and when
 │       ├── analysis.py           # PCAP parsing and run analytics
 │       ├── export.py             # zip and CSV downloads
 │       ├── routes.py             # /api/<experiment>/... for each, /api/experiments for all
-│       └── toolbox/              # Docker build context (inference server + client)
+│       └── toolbox/              # Docker build context (inference server + client), and marble/: the MARBLE code
 ├── app/                          # Next.js pages (see below)
 ├── components/                   # UI: shell/, charts/, experiments/, settings/, overview/
 ├── lib/                          # API client, formatting, theme, experiments list
@@ -55,7 +59,7 @@ Open http://localhost:3000. API docs: http://localhost:3000/api/docs.
 
 ## Using it
 
-The sidebar lists six experiments: the five from the repo (Data Collector, Temperature Change, Custom Prompts, Scalability and Delay) and the Custom Experiment, which you set up yourself.
+The sidebar has two sections. **Client to Server** lists six experiments, one prompt and its streamed response per capture: the five from the repo (Data Collector, Temperature Change, Custom Prompts, Scalability and Delay) and the Custom Experiment, which you set up yourself. **Agentic AI** lists the experiments where several agents work on a task through one LLM server: Topology Transfer (see [Agentic AI](#agentic-ai)).
 
 | Page | What it's for |
 | --- | --- |
@@ -88,6 +92,29 @@ The captures of a prompt's settings run one after the other (prompt 1 at every t
 The Delay experiment, and a Custom Experiment scenario with a delay, need the host kernel's `sch_netem` module (`sudo modprobe sch_netem`). If `tc` fails, the run stops with that hint instead of capturing without the delay. Jitter needs a delay, and a distribution only applies with jitter (iproute2 rejects it otherwise).
 
 Runs are saved in the results folder (`data/` by default, changeable in Settings), so the history survives restarts; a run that was active when the API stopped shows as *interrupted*.
+
+**Provider (Data Collector).** *Hugging Face* is the app's own server loading a HuggingFace model with transformers, as in the original script. *Ollama* serves an Ollama model instead (`api/experiments/ollama_engine.py`): a fresh `ollama/ollama` container per prompt with the Ollama models folder mounted, and a client that loads the model, then streams `/api/generate`. The prompts, the isolated network, the capture and the results are the same. Ollama models are downloaded in Settings → Ollama models; the app pulls them from the Ollama library itself (`api/settings/ollama_models.py`), so nothing has to be installed on the host. The `ollama/ollama` image is pulled on the first run and kept.
+
+### Agentic AI
+
+**Topology Transfer** runs [MARBLE](https://github.com/pooryousefshahrooz/marble-traffic-dataset) tasks: several agents (usually 3 to 5) work on a task, and every LLM call of every agent goes to one Ollama server. A run captures each task once per coordination topology (graph and star), with the same agents and model, so a task fingerprint learned under one topology can be tested on the other.
+
+The MARBLE code ships with the API, in `api/experiments/toolbox/marble/`, so it goes wherever `api/` is deployed. It is a copy of [pooryousefshahrooz/marble-traffic-dataset](https://github.com/pooryousefshahrooz/marble-traffic-dataset) at commit `551e071` (2026-07-17), MIT license (`LICENSE` in that folder); its own `README.md` describes the fork. It is a snapshot, not a submodule: to update it, copy the folder again from that repository. Left out of the copy: the tree and chain task configs (not collected for the dataset), MARBLE's demo configs for its database and Minecraft scenarios (`marble/configs/test_config_database`, `test_config_minecraft`, `coding_configs`), its tests, CI files, images and lock file, and `.env.template`.
+
+Before the first run, download an Ollama model with tool calls in Settings → Ollama models (the dataset was collected with `llama3.2:3b`).
+
+How a run captures (`api/experiments/marble_engine.py`, ported from `toolbox/marble/scripts/capture_marble_dataset.py`):
+
+- Each worker keeps an Ollama container with the model loaded, on its own isolated network, and a TLS proxy sharing Ollama's network namespace. Ollama listens on its loopback only, so the proxy's port (11443) is the only thing on the network and everything on it is TLS.
+- Per task: a tcpdump sidecar on that namespace, then MARBLE in a fresh container (image built from `toolbox/marble/` by `toolbox/Dockerfile.marble`). The run saves the PCAP, `captures/<stem>.agent_calls.json` (which agent made each call and when, in the dataset's format), the task's config as it ran and MARBLE's output.
+- A task that doesn't finish in 300 s, or that MARBLE doesn't complete, is kept and marked *not completed*; it is left out of the medians and the heatmap. Three in a row stop the run.
+- The database tasks (they start PostgreSQL with `docker compose`) and the research tasks (they fetch papers from the internet) can't run in the agents' container and are disabled.
+
+Unlike the original, which captured on the host's loopback, the capture is taken on the model server's network interface, so packet sizes are not directly comparable with the published dataset's.
+
+**Results** are measured as in the dataset's analysis, over the encrypted application packets of every connection of a task: packets, bytes, duration, packet rate, bursts and idle time, plus the LLM calls and agents. The **Traffic by task category** tile is the dataset's heatmap for each topology: each measurement's median per category, standardized across the categories. A capture's page shows each agent's calls over time and the packets from the model server.
+
+Feature Importance (the Random Forest ranking of the 247 traffic features) is not in the app yet.
 
 ### Workers, parallel runs and the queue
 
@@ -149,6 +176,8 @@ Nothing without that label is touched. If the API process dies mid-run, the next
 | ------------------ | ----------------------- | -------------------------------------------------------------- |
 | `MALLM_MODELS_DIR` | `models/`               | Downloaded models. Point it at an existing models folder to reuse it. |
 | `MALLM_DATA_DIR`   | `data/`                 | Settings, prompts, and experiment outputs unless another results folder is set in Settings. |
+| `MALLM_OLLAMA_DIR` | `ollama_models/` (next to the models folder) | Ollama models, in Ollama's own layout. Mounted into the Ollama containers as `/root/.ollama`. |
+| `MALLM_MARBLE_DIR` | `api/experiments/toolbox/marble/` | The MARBLE code the agentic experiments run. |
 | `HF_TOKEN`         | none                    | HuggingFace token, used when none is saved in Settings.        |
 | `PYTHON` | `.venv/bin/python` | Python that runs the FastAPI backend. Set it to use a conda or other environment, e.g. `PYTHON=python` after `conda activate`. |
 | `API_PORT` | `8000` | Port of the FastAPI backend. Used by the `dev:api`/`start:api` scripts *and* by Next.js to forward `/api/*`, so set it for both (e.g. `API_PORT=8007 npm run dev`). |

@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
 
 import { api, isActive, type Run } from "@/lib/api";
-import { experimentHref, runHref } from "@/lib/experiments";
+import { experimentHref, isAgentic, runHref } from "@/lib/experiments";
 import { formatBytes, formatDuration, hardwareLabel, timeAgo } from "@/lib/format";
 import { useInterval } from "@/lib/useInterval";
 import { Alert, ButtonLink, EmptyState, Loading, ProgressBar, StatusPill } from "@/components/ui";
@@ -63,7 +63,9 @@ export function RunsTable({ experiment }: { experiment: string }) {
           </ButtonLink>
         }
       >
-        Each run streams prompts through a fresh model container and captures every packet for analysis.
+        {isAgentic(experiment)
+          ? "Each run has several agents work on tasks through one model server and captures every packet between them."
+          : "Each run streams prompts through a fresh model container and captures every packet for analysis."}
       </EmptyState>
     );
   }

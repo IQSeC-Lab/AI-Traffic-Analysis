@@ -1,0 +1,164 @@
+scenario: bugfix
+task_id: 5
+agents:
+- agent_id: agent1
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: "You are the Planner. You have the full technical specification below,\
+    \ including the exact bug and the required fix. Relay the necessary details to\
+    \ the Executor -- you cannot edit code yourself.\n\n# GH121_quart_302: avoid ResourceWarning\
+    \ in `DataBody.__aiter__`  — Full Specification (Planner Only)\n\n## Source\n\
+    - PR: https://github.com/pallets/quart/pull/302\n- Issue: https://github.com/pallets/quart/issues/301\n\
+    - Repo: https://github.com/pallets/quart\n\n## Issue Description\n\nfrom quart-trio\
+    \ I get a:\n\n```ResourceWarning: Async generator 'quart.wrappers.response.DataBody.__aiter__.<locals>._aiter'\
+    \ was garbage collected before it had been exhausted. Surround its use in 'async\
+    \ with aclosing(...):' to ensure that it gets cleaned up as soon as you're done\
+    \ using it.```\n\nEnvironment:\n\n- Python version:\n- Quart version:\n\n## Issue\
+    \ Discussion (Root Cause Analysis)\n\n### Comment 1 (@pgjones):\n\nI'm also unsure\
+    \ how to test this, however I've an alternative fix,\n```python\ndiff --git a/src/quart/wrappers/response.py\
+    \ b/src/quart/wrappers/response.py\nindex 9460c2e..6b0b364 100644\n\n        \
+    \ self.data = data\n         self.begin = 0\n         self.end = len(self.data)\n\
+    +        self.iter: AsyncGenerator[bytes, None]\n \n     async def __aenter__(self)\
+    \ -> DataBody:\n+        async def _aiter() -> AsyncGenerator[bytes, None]:\n\
+    +            yield self.data[self.begin : self.end]\n+\n+        self.iter = _aiter()\n\
+    \         return self\n \n     async def __aexit__(self, exc_type: type, exc_value:\
+    \ BaseException, tb: TracebackType) -> None:\n-        pass\n+        await self.iter.aclose()\n\
+    \ \n     def __aiter__(self) -> AsyncIterator:\n-        async def _aiter() ->\
+    \ AsyncGenerator[bytes, None]:\n-            yield self.data[self.begin : self.end]\n\
+    -\n-        return _aiter()\n+        return self.iter\n \n     async def make_conditional(self,\
+    \ begin: int, end: int | None) -> int:\n         self.begin = begin\n```\n\nWhat\
+    \ do you think of this? I prefer it as it is more similar to the `IterableBody`\n\
+    \n## PR Review Comments\n\n**@davidism** on `src/quart/wrappers/response.py`:\n\
+    \nThis type of optimization should no longer be needed in modern Python.\n\n**@graingert**\
+    \ on `src/quart/wrappers/response.py`:\n\n```suggestion\n        return self._data_body.data[self._data_body.begin\
+    \ : self._data_body.end]\n```\n\n## Files Changed in Fix\n\n- `src/quart/wrappers/response.py`\
+    \ (modified, +15/-5)\n\n## `src/quart/wrappers/response.py`\n[Code changes omitted\
+    \ — Planner should analyze the issue and guide the Executor]\n\n## Acceptance\
+    \ Criteria\n\n1. All tests in the test suite pass: `pytest -x -q`\n2. No regressions\
+    \ in unchanged functionality\n3. Fix matches the approach described in the issue/PR\
+    \ discussion above\n\n## Important Notes\n\n- Only modify the source files listed\
+    \ above (not test files)\n- The test files already encode the correct expected\
+    \ behaviour\n- Run `pytest -x -q` to verify your fix"
+- agent_id: agent2
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are the Executor. You only know the high-level problem below. You
+    must ask the Planner for the specific fix details before proposing any code change
+    -- do not guess at implementation details you were not given.
+
+
+    # Quart 302 — Bug Fix
+
+
+    - PR: https://github.com/pallets/quart/pull/302
+
+
+    The Planner will analyze the root cause and provide guidance.
+
+    Follow the Planner''s instructions to fix the issue.
+
+
+    ## Files That May Need Changes
+
+
+    - `src/quart/wrappers/response.py`
+
+
+    ## Verification
+
+
+    Run the test suite to confirm your fix:
+
+
+    ```
+
+    pytest -x -q
+
+    ```
+
+
+    Do NOT modify test files.
+
+
+    Follow the Planner''s guidance precisely.
+
+
+    ## Verification
+
+    Run the test suite to verify your fix.
+
+    Do NOT modify test files.'
+- agent_id: agent3
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: You are the Verifier. Once the Executor proposes a fix, check it against
+    the Planner's stated requirements and report whether it looks correct, complete,
+    and doesn't break the stated invariants.
+coordinate_mode: graph
+engine_planner:
+  initial_progress: Starting bug-fix coordination for GH121_quart_302.
+environment:
+  max_iterations: 5
+  name: Bugfix Coordination Environment
+  type: Base
+llm: ollama/llama3.2:3b
+memory:
+  type: BaseMemory
+metrics:
+  evaluate_llm: ollama/llama3.2:3b
+  engagement_level: true
+  relevance: true
+output:
+  file_path: result/bugfix_output.jsonl
+  format: jsonl
+relationships:
+- - agent1
+  - agent2
+  - collaborate with
+- - agent1
+  - agent3
+  - collaborate with
+- - agent2
+  - agent3
+  - collaborate with
+task:
+  content: '
+
+    You are a 3-agent team fixing a real software bug from an open-source project.
+
+    agent1 is the Planner: they have the full technical specification of the bug
+
+    and required fix, but cannot edit any code themselves. agent2 is the Executor:
+
+    they only know the high-level problem statement and must ask the Planner for
+
+    the specific details needed to implement the fix -- they should not guess.
+
+    agent3 is the Verifier: once a fix is proposed, they check it against the
+
+    requirements and report whether it looks correct and complete.
+
+
+    Work together: the Planner should relay every specific requirement to the
+
+    Executor, the Executor should propose the concrete code change, and the
+
+    Verifier should give a final assessment of whether the fix satisfies the
+
+    specification.
+
+    '
+  output_format: 'Respond in this format:
+
+    **[Role and Action]**
+
+    State your role (Planner/Executor/Verifier) and what you are doing this turn.
+
+
+    **[Content]**
+
+    Your actual contribution: the Planner explains requirements, the Executor
+
+    proposes a concrete fix, the Verifier checks the fix against requirements.
+
+    '

@@ -69,7 +69,7 @@ export function ModelDownloader() {
     <Card
       id="models"
       title="Models"
-      description="Download models from Hugging Face. The experiments can use any model listed here."
+      description="Download models from Hugging Face. The client to server experiments can use any model listed here."
     >
       <div className="space-y-6">
         <form onSubmit={download} className="grid gap-3 sm:grid-cols-[1fr_11rem_auto] sm:items-end">

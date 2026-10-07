@@ -1,0 +1,132 @@
+scenario: bugfix
+task_id: 11
+agents:
+- agent_id: agent1
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: "You are the Planner. You have the full technical specification below,\
+    \ including the exact bug and the required fix. Relay the necessary details to\
+    \ the Executor -- you cannot edit code yourself.\n\n# GH143_mitmproxy_8095: Option\
+    \ to hide quickhelp UI (#5746) — Full Specification (Planner Only)\n\n## Source\n\
+    - PR: https://github.com/mitmproxy/mitmproxy/pull/8095\n- Issue: https://github.com/mitmproxy/mitmproxy/issues/5746\n\
+    - Repo: https://github.com/mitmproxy/mitmproxy\n\n## Issue Description\n\n####\
+    \ Problem Description\n\nIt would be useful for experienced users to hide quick\
+    \ help bar\n\n#### Proposal\nAdd option in section \"console\" like console_help_bar\
+    \ -> true/false\n\n## Issue Discussion (Root Cause Analysis)\n\n### Comment 1\
+    \ (@mhils):\n\nPRs welcome!\n\n### Comment 2 (@prady0t):\n\nCurrently working\
+    \ on this.\n\n### Comment 3 (@prady0t):\n\nHey @mhils can you help me get started?\
+    \ Where should I look for?\n\n### Comment 4 (@mhils):\n\nThe relevant code is\
+    \ in `mitmproxy.tools.console`. This feature is pretty much at the very bottom\
+    \ of my priority list, so I won't look closer into it! Whoever wants this needs\
+    \ to figure it out by themselves.\n\n## PR Review Comments\n\n**@lups2000** on\
+    \ `CHANGELOG.md`:\n\nAllow hiding the Quick Help UI in the mitmproxy console with\
+    \ the 'H' key.\n\n**@lups2000** on `mitmproxy/tools/console/consoleaddons.py`:\n\
+    \nNit: I would rename the command `console_quickhelp_visible` for better clarity\n\
+    \n**@lups2000** on `mitmproxy/tools/console/defaultkeys.py`:\n\n```suggestion\n\
+    \    km.add(\"H\", \"set console_quickhelp toggle\", [\"global\"], \"Toggle quick\
+    \ help bar visibility\")\n```\n\n**@lups2000** on `mitmproxy/tools/console/statusbar.py`:\n\
+    \n```suggestion\n        master.options.subscribe(self.sig_options_update, [\"\
+    console_quickhelp_visible\"])\n```\n\n**@lups2000** on `mitmproxy/tools/console/statusbar.py`:\n\
+    \n```suggestion\n        if not self.master.options.console_quickhelp_visible:\n\
+    ```\n\n## Files Changed in Fix\n\n- `CHANGELOG.md` (modified, +2/-0)\n- `mitmproxy/tools/console/consoleaddons.py`\
+    \ (modified, +6/-0)\n- `mitmproxy/tools/console/defaultkeys.py` (modified, +6/-0)\n\
+    - `mitmproxy/tools/console/statusbar.py` (modified, +19/-0)\n- `test/mitmproxy/tools/console/test_statusbar.py`\
+    \ (modified, +91/-0)\n\n## `mitmproxy/tools/console/consoleaddons.py`\n[Code changes\
+    \ omitted — Planner should analyze the issue and guide the Executor]\n\n### `mitmproxy/tools/console/defaultkeys.py`\n\
+    [Code changes omitted — Planner should analyze the issue and guide the Executor]\n\
+    \n### `mitmproxy/tools/console/statusbar.py`\n[Code changes omitted — Planner\
+    \ should analyze the issue and guide the Executor]\n\n## Acceptance Criteria\n\
+    \n1. All tests in the test suite pass: `pytest -x -q`\n2. No regressions in unchanged\
+    \ functionality\n3. Fix matches the approach described in the issue/PR discussion\
+    \ above\n\n## Important Notes\n\n- Only modify the source files listed above (not\
+    \ test files)\n- The test files already encode the correct expected behaviour\n\
+    - Run `pytest -x -q` to verify your fix"
+- agent_id: agent2
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: "You are the Executor. You only know the high-level problem below. You\
+    \ must ask the Planner for the specific fix details before proposing any code\
+    \ change -- do not guess at implementation details you were not given.\n\n# Mitmproxy\
+    \ 8095 — Bug Fix\n\n- PR: https://github.com/mitmproxy/mitmproxy/pull/8095\n\n\
+    The Planner will analyze the root cause and provide guidance.\nFollow the Planner's\
+    \ instructions to fix the issue.\n\n## Files That May Need Changes\n\n       \
+    \ - `mitmproxy/tools/console/consoleaddons.py`\n- `mitmproxy/tools/console/defaultkeys.py`\n\
+    - `mitmproxy/tools/console/statusbar.py`\n\n        ## Verification\n\n      \
+    \  Run the test suite to confirm your fix:\n\n        ```\n        pytest test/mitmproxy/tools/console/test_statusbar.py\
+    \ -x -q\n        ```\n\n        Do NOT modify test files.\n\n        Follow the\
+    \ Planner's guidance precisely.\n\n## Verification\nRun the test suite to verify\
+    \ your fix.\nDo NOT modify test files."
+- agent_id: agent3
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: You are the Verifier. Once the Executor proposes a fix, check it against
+    the Planner's stated requirements and report whether it looks correct, complete,
+    and doesn't break the stated invariants.
+coordinate_mode: star
+engine_planner:
+  initial_progress: Starting bug-fix coordination for GH143_mitmproxy_8095.
+environment:
+  max_iterations: 5
+  name: Bugfix Coordination Environment
+  type: Base
+llm: ollama/llama3.2:3b
+memory:
+  type: BaseMemory
+metrics:
+  evaluate_llm: ollama/llama3.2:3b
+  engagement_level: true
+  relevance: true
+output:
+  file_path: result/bugfix_output.jsonl
+  format: jsonl
+relationships:
+- - agent1
+  - agent2
+  - collaborate with
+- - agent1
+  - agent3
+  - collaborate with
+- - agent2
+  - agent3
+  - collaborate with
+task:
+  content: '
+
+    You are a 3-agent team fixing a real software bug from an open-source project.
+
+    agent1 is the Planner: they have the full technical specification of the bug
+
+    and required fix, but cannot edit any code themselves. agent2 is the Executor:
+
+    they only know the high-level problem statement and must ask the Planner for
+
+    the specific details needed to implement the fix -- they should not guess.
+
+    agent3 is the Verifier: once a fix is proposed, they check it against the
+
+    requirements and report whether it looks correct and complete.
+
+
+    Work together: the Planner should relay every specific requirement to the
+
+    Executor, the Executor should propose the concrete code change, and the
+
+    Verifier should give a final assessment of whether the fix satisfies the
+
+    specification.
+
+    '
+  output_format: 'Respond in this format:
+
+    **[Role and Action]**
+
+    State your role (Planner/Executor/Verifier) and what you are doing this turn.
+
+
+    **[Content]**
+
+    Your actual contribution: the Planner explains requirements, the Executor
+
+    proposes a concrete fix, the Verifier checks the fix against requirements.
+
+    '

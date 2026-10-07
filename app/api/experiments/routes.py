@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from . import analysis, custom_experiment, custom_prompts, engine, export
+from . import analysis, custom_experiment, custom_prompts, engine, export, marble_analysis, topology_transfer
 from .base import NAME_MAX, Kind
 from .kinds import KINDS
 
@@ -48,8 +48,11 @@ def make_router(kind: Kind) -> APIRouter:
             raise HTTPException(404, f"Run not found: {run_id}")
         return run
 
+    # An agentic run's captures are whole tasks, measured differently (marble_analysis.py)
+    analyzer = marble_analysis if kind.agentic else analysis
+
     def _aggregate(run) -> dict:
-        return analysis.run_aggregate(run.id, run.run_dir, run.variants)
+        return analyzer.run_aggregate(run.id, run.run_dir, run.variants)
 
     def _capture(run, key: str):
         found = analysis.find_capture(run.run_dir, run.variants, key)
@@ -122,14 +125,24 @@ def make_router(kind: Kind) -> APIRouter:
     def run_analytics(run_id: str) -> dict:
         """The run's summary, and its summaries and distributions per variant (temperature,
         model, network condition, scenario; a single group for the Data Collector), on shared bins."""
-        aggregate = _aggregate(_get_run(run_id))
+        run = _get_run(run_id)
+        aggregate = _aggregate(run)
         groups = [(g["key"], g["label"], g) for g in aggregate["groups"]]
-        return {"summary": aggregate["summary"], **_analytics(groups)}
+        found = {"summary": aggregate["summary"], **_analytics(groups)}
+        if kind.agentic:
+            # Per topology: the task categories against the traffic measurements, standardized
+            found["heatmap"] = {
+                "metrics": [{"key": key, "label": label} for key, label in marble_analysis.HEATMAP_METRICS],
+                "topologies": marble_analysis.heatmap(aggregate, run.variants),
+            }
+        return found
 
     @router.get("/runs/{run_id}/captures")
     def list_captures(run_id: str) -> list[dict]:
         records = _aggregate(_get_run(run_id))["records"]
         fields = ("key", "variant", "index", "prompt", "iteration", "category", "worker", "gpus", "metrics", "error")
+        if kind.agentic:
+            fields += ("task_id", "status")
         return [{k: r.get(k) for k in fields} for r in records]
 
     @router.get("/runs/{run_id}/export.zip")
@@ -147,7 +160,7 @@ def make_router(kind: Kind) -> APIRouter:
         """One row per capture with its settings and metrics, for spreadsheets or pandas."""
         run = _get_run(run_id)
         return Response(
-            export.captures_csv(_aggregate(run)["records"], run.variants),
+            export.captures_csv(_aggregate(run)["records"], run.variants, agentic=kind.agentic),
             media_type="text/csv",
             headers={"Content-Disposition": f'attachment; filename="mallm-{run.id}-captures.csv"'},
         )
@@ -157,7 +170,7 @@ def make_router(kind: Kind) -> APIRouter:
         """A capture by its key (file stem, e.g. Qwen-Qwen2.5-7B-Instruct-p01)."""
         run = _get_run(run_id)
         index, variant = _capture(run, key)
-        return analysis.capture_detail(run.run_dir, key, index, variant)
+        return analyzer.capture_detail(run.run_dir, key, index, variant)
 
     @router.get("/runs/{run_id}/captures/{key}/pcap")
     def download_pcap(run_id: str, key: str) -> FileResponse:
@@ -190,4 +203,4 @@ def all_active_runs() -> list[dict]:
 
 
 routers = [all_router, *(make_router(kind) for kind in KINDS.values()),
-           custom_prompts.router, custom_experiment.router]
+           custom_prompts.router, custom_experiment.router, topology_transfer.router]

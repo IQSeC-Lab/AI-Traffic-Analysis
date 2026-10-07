@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { AppearanceCard } from "@/components/settings/AppearanceCard";
 import { HfTokenCard } from "@/components/settings/HfTokenCard";
 import { ModelDownloader } from "@/components/settings/ModelDownloader";
+import { OllamaModels } from "@/components/settings/OllamaModels";
 import { SamplingCard } from "@/components/settings/SamplingCard";
 import { StorageCard } from "@/components/settings/StorageCard";
 import { PageHeader } from "@/components/ui";
@@ -20,7 +21,10 @@ export default function SettingsPage() {
           <StorageCard />
           <HfTokenCard />
         </div>
-        <ModelDownloader />
+        <div className="space-y-6">
+          <ModelDownloader />
+          <OllamaModels />
+        </div>
       </div>
     </>
   );

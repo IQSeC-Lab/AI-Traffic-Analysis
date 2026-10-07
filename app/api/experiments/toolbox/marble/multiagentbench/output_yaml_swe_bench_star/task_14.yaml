@@ -1,0 +1,104 @@
+scenario: swe_bench
+task_id: 14
+agents:
+- agent_id: agent1
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are the Planner. You have the full GitHub issue below (from sphinx-doc/sphinx,
+    sphinx-doc__sphinx-7975), including the exact bug report. Relay the necessary
+    details to the Executor -- you cannot edit code yourself.
+
+
+    # GitHub Issue
+
+
+    Two sections called Symbols in index
+
+    When using index entries with the following leading characters: _@_, _£_, and
+    _←_ I get two sections called _Symbols_ in the HTML output, the first containing
+    all _@_ entries before ”normal” words and the second containing _£_ and _←_ entries
+    after the ”normal” words.  Both have the same anchor in HTML so the links at the
+    top of the index page contain two _Symbols_ links, one before the letters and
+    one after, but both lead to the first section.'
+- agent_id: agent2
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: You are the Executor. You only know that there is a bug in sphinx-doc/sphinx
+    (sphinx-doc__sphinx-7975) that needs fixing. You must ask the Planner for the
+    specific issue details before proposing any code change -- do not guess at implementation
+    details you were not given.
+- agent_id: agent3
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: You are the Verifier. Once the Executor proposes a fix, check it against
+    the Planner's stated requirements and report whether it looks correct, complete,
+    and doesn't break other functionality.
+coordinate_mode: star
+engine_planner:
+  initial_progress: Starting bug-fix coordination for sphinx-doc__sphinx-7975.
+environment:
+  max_iterations: 5
+  name: SWE-bench Coordination Environment
+  type: Base
+llm: ollama/llama3.2:3b
+memory:
+  type: BaseMemory
+metrics:
+  evaluate_llm: ollama/llama3.2:3b
+  engagement_level: true
+  relevance: true
+output:
+  file_path: result/swe_bench_output.jsonl
+  format: jsonl
+relationships:
+- - agent1
+  - agent2
+  - collaborate with
+- - agent1
+  - agent3
+  - collaborate with
+- - agent2
+  - agent3
+  - collaborate with
+task:
+  content: '
+
+    You are a 3-agent team fixing a real software bug in the open-source project
+
+    sphinx-doc/sphinx. agent1 is the Planner: they have the full GitHub issue describing
+    the
+
+    bug, but cannot edit any code themselves. agent2 is the Executor: they only
+
+    know the high-level problem and must ask the Planner for the specific details
+
+    needed to implement the fix -- they should not guess. agent3 is the Verifier:
+
+    once a fix is proposed, they check it against the issue description and
+
+    report whether it looks correct and complete.
+
+
+    Work together: the Planner should relay every specific requirement to the
+
+    Executor, the Executor should propose the concrete code change, and the
+
+    Verifier should give a final assessment of whether the fix addresses the
+
+    reported issue.
+
+    '
+  output_format: 'Respond in this format:
+
+    **[Role and Action]**
+
+    State your role (Planner/Executor/Verifier) and what you are doing this turn.
+
+
+    **[Content]**
+
+    Your actual contribution: the Planner explains the issue, the Executor
+
+    proposes a concrete fix, the Verifier checks the fix against the issue.
+
+    '

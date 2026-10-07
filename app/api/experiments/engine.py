@@ -332,7 +332,7 @@ class Experiment:
         if self.kind.variable and self.kind.variable != "Model":
             self.log(f"Compare : {' | '.join(v.label for v in self.variants)}")
         temperatures = {v.temperature for v in self.variants}
-        if len(temperatures) == 1:   # not a temperature sweep
+        if len(temperatures) == 1 and self.kind.sampled:   # not a temperature sweep
             t = temperatures.pop()
             self.log(f"Sampling: {'greedy (temperature 0)' if t == 0 else f'temperature {t:g}'}")
         where = lambda gpus: " ".join(_gpu_args(gpus)[1:]) or "none (CPU)"
@@ -395,7 +395,7 @@ class Experiment:
                 variant = self.variants[v]
                 state["current"] = {"prompt": prompt_no, "iteration": iteration, "index": index, "variant": variant.key}
                 self._save()
-                title = f"Prompt #{prompt_no:02d}"
+                title = self._title(prompt_no)
                 if iteration is not None:
                     title += f", iteration {iteration}/{self.config.repeat}"
                 self.log("=" * 60)
@@ -415,6 +415,10 @@ class Experiment:
             self._cancel.set()
         finally:
             state["current"] = state["step"] = None
+
+    def _title(self, prompt_no: int) -> str:
+        """How the log names one of the run's prompts."""
+        return f"Prompt #{prompt_no:02d}"
 
     def _units(self):
         """
@@ -600,7 +604,7 @@ class Experiment:
             "run", "--rm", "--name", cname, "--label", self.label,
             "--network", self._workers[k]["network"],
             "-v", f"{self.logs_dir}:/prompts:ro",
-            self.image, "python", "/app/client.py",
+            *self._client_command(variant),
             "--host", inf_container,
             "--port", str(INFERENCE_PORT),
             "--index", str(index),
@@ -631,6 +635,10 @@ class Experiment:
         except Exception:
             self.log(f"[client] Could not parse client output: {p.stdout[:300]}")
             return None
+
+    def _client_command(self, variant: Variant) -> list[str]:
+        """The client's image and command; the server, prompt and limits are added to it."""
+        return [self.image, "python", "/app/client.py"]
 
     def _collect_logs(self, inf_container: str, variant: Variant, index: int, stem: str,
                       prompt: str | None = None, response: str | None = None) -> None:
@@ -741,10 +749,8 @@ def with_default_temperature(variants: list[Variant]) -> list[Variant]:
     ]
 
 
-def submit(kind: Kind, config: RunConfig) -> Experiment:
-    """Queue a run. It starts right away when its hardware is free, otherwise when it frees up."""
-    prompts = (kind.prompts or library_prompts)(config)
-    variants = with_default_temperature(kind.variants(config))
+def downloaded_models_mb(config: RunConfig, variants: list[Variant]) -> int:
+    """GPU memory a worker needs for the run's HuggingFace models, which must all be downloaded."""
     need_mb = 0
     for model in dict.fromkeys(v.model for v in variants):
         model_dir = MODELS_DIR / model_dir_name(model)
@@ -757,6 +763,16 @@ def submit(kind: Kind, config: RunConfig) -> Experiment:
         # Workers run the models one after the other, so they reserve room for the largest
         if config.gpus != []:
             need_mb = max(need_mb, estimate_gpu_memory_mb(model_dir))
+    return need_mb
+
+
+def submit(kind: Kind, config: RunConfig) -> Experiment:
+    """Queue a run. It starts right away when its hardware is free, otherwise when it frees up."""
+    prompts = (kind.prompts or library_prompts)(config)
+    variants = kind.variants(config)
+    if kind.sampled:
+        variants = with_default_temperature(variants)
+    need_mb = kind.check(config, variants) if kind.check else downloaded_models_mb(config, variants)
 
     if isinstance(config.gpus, list):
         config.gpus = sorted(set(config.gpus))
@@ -771,7 +787,8 @@ def submit(kind: Kind, config: RunConfig) -> Experiment:
     scheduler.check_possible(config.gpus, need_mb, config.workers, gpus, config.split_model)
 
     with _lock:
-        run = Experiment(kind, config, variants, prompts, need_mb, _next_number())
+        runner = (kind.runner(config) if kind.runner else None) or Experiment
+        run = runner(kind, config, variants, prompts, need_mb, _next_number())
         _runs[run.id] = run
         run._save()
     _ensure_scheduler()

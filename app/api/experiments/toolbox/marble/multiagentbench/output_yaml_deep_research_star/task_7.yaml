@@ -1,0 +1,104 @@
+scenario: deep_research
+task_id: 7
+agents:
+- agent_id: agent1
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are a research analyst on a collaborative team. You focus on quantitative
+    evidence: statistics, data sources, and empirical studies relevant to the question.'
+- agent_id: agent2
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are a research analyst on a collaborative team. You focus on qualitative
+    and contextual factors: historical background, stakeholder perspectives, and real-world
+    case studies.'
+- agent_id: agent3
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are a research analyst on a collaborative team. You focus on critically
+    evaluating claims: identifying gaps, biases, counterarguments, and limitations
+    in the evidence.'
+- agent_id: agent4
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: 'You are a research analyst on a collaborative team. You focus on synthesis:
+    pulling the team''s findings together into clear, actionable conclusions and recommendations.'
+coordinate_mode: star
+engine_planner:
+  initial_progress: 'Starting collaborative research on: Acting as an expert in K-12
+    education research and an experienced frontline teac'
+environment:
+  max_iterations: 5
+  name: Deep Research Coordination Environment
+  type: Base
+llm: ollama/llama3.2:3b
+memory:
+  type: BaseMemory
+metrics:
+  evaluate_llm: ollama/llama3.2:3b
+  engagement_level: true
+  relevance: true
+  diversity_of_perspectives: true
+output:
+  file_path: result/deep_research_output.jsonl
+  format: jsonl
+relationships:
+- - agent1
+  - agent2
+  - collaborate with
+- - agent1
+  - agent3
+  - collaborate with
+- - agent1
+  - agent4
+  - collaborate with
+- - agent2
+  - agent3
+  - collaborate with
+- - agent2
+  - agent4
+  - collaborate with
+- - agent3
+  - agent4
+  - collaborate with
+task:
+  content: '
+
+    Dear Research Team,
+
+
+    You are collaborating to produce a research summary answering the following
+
+    real research question (topic: Education & Jobs):
+
+
+    **Question**
+
+
+    Acting as an expert in K-12 education research and an experienced frontline teacher,
+    research and analyze global case studies on the practical application of AIGC
+    (AI-Generated Content) in primary and secondary school classrooms. Identify, categorize,
+    and analyze various application approaches and their corresponding examples. The
+    final report should present an overall framework, detailed category discussions,
+    practical implementation methods, future trends, and recommendations for educators.
+
+
+    Work together: each of you brings a different analytical lens to this
+
+    question. Share findings, challenge each other''s assumptions, and converge
+
+    on a well-supported answer.
+
+    '
+  output_format: 'Respond in this format:
+
+    **[Contribution]**
+
+    Your finding or argument this turn, from your analytical lens.
+
+
+    **[Open Questions]**
+
+    Anything you think the team still needs to address.
+
+    '

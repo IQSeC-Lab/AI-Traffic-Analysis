@@ -1,0 +1,84 @@
+scenario: debate
+task_id: 11
+agents:
+- agent_id: agent1
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: You are the Proposition debater. You argue IN FAVOR of the motion. Build
+    a strong case, anticipate counterarguments, and rebut the Opposition's points
+    directly.
+- agent_id: agent2
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: You are the Opposition debater. You argue AGAINST the motion. Build a strong
+    case, anticipate counterarguments, and rebut the Proposition's points directly.
+- agent_id: agent3
+  type: BaseAgent
+  llm: ollama/llama3.2:3b
+  profile: You are the Judge. Listen to both sides, evaluate argument strength and
+    rebuttal quality impartially, and at the end declare which side made the stronger
+    case and why.
+coordinate_mode: graph
+engine_planner:
+  initial_progress: 'Starting debate on: THW introduce female gender quota for judges.'
+environment:
+  max_iterations: 5
+  name: Debate Coordination Environment
+  type: Base
+llm: ollama/llama3.2:3b
+memory:
+  type: BaseMemory
+metrics:
+  evaluate_llm: ollama/llama3.2:3b
+  engagement_level: true
+  relevance: true
+output:
+  file_path: result/debate_output.jsonl
+  format: jsonl
+relationships:
+- - agent1
+  - agent2
+  - opposes
+- - agent1
+  - agent3
+  - collaborate with
+- - agent2
+  - agent3
+  - collaborate with
+task:
+  content: '
+
+    A debate is being held on the following real competitive debate motion
+
+    (from an actual tournament):
+
+
+    **Motion**
+
+
+    THW introduce female gender quota for judges.
+
+
+    agent1 (Proposition) argues in favor of the motion. agent2 (Opposition)
+
+    argues against it. agent3 (Judge) listens to both sides, asks clarifying
+
+    questions if needed, and scores each round on argument strength and
+
+    rebuttal quality, ultimately declaring which side made the stronger case.
+
+    '
+  output_format: 'Respond in this format:
+
+    **[Role]**
+
+    State your role (Proposition/Opposition/Judge).
+
+
+    **[Argument or Ruling]**
+
+    Proposition/Opposition: your argument or rebuttal this round.
+
+    Judge: your assessment of the round so far, or final ruling.
+
+    '
