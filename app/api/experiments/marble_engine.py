@@ -43,8 +43,34 @@ PROXY_PORT   = 11443   # as in the original, so its analysis code reads these ca
 TASK_TIMEOUT = 300     # seconds, the original's limit for every category that runs here
 LOAD_TIMEOUT = 900
 IMPORT_TIMEOUT = 180
+CHECK_TIMEOUT = 300
 LOG_BYTES    = 400_000   # of a task's output kept in its log
 MAX_FAILURES = 3         # tasks failing in a row on a worker before the run stops
+
+
+# Run in the agents' image before a worker's first task: one call to the model the way MARBLE
+# makes them (marble/llms/model_prompting.py), so a model server the agents can't use stops
+# the run with the reason, instead of every task failing after its retries.
+MODEL_CHECK = """
+import os, ssl, urllib.error, urllib.request
+base = os.environ["MARBLE_OLLAMA_PROXY_URL"]
+try:
+    status = urllib.request.urlopen(base + "/api/version", timeout=30, context=ssl._create_unverified_context()).status
+except urllib.error.HTTPError as e:
+    status = e.code
+except Exception as e:
+    raise SystemExit(f"MODEL_ERROR no answer from {base}: {type(e).__name__}: {e}")
+if status != 200:
+    raise SystemExit(f"MODEL_ERROR the model server answered HTTP {status} at {base}")
+import litellm
+litellm.ssl_verify = False
+try:
+    r = litellm.completion(model=os.environ["MODEL"], messages=[{"role": "user", "content": "Reply with OK."}],
+                           max_tokens=8, temperature=0.0, base_url=base)
+    print("MODEL_OK", repr(r.choices[0].message.content)[:80])
+except Exception as e:
+    raise SystemExit("MODEL_ERROR " + type(e).__name__ + ": " + " ".join(str(e).split())[:600])
+"""
 
 
 class MarbleExperiment(Experiment):
@@ -124,6 +150,10 @@ class MarbleExperiment(Experiment):
         self._set_step("Starting Ollama")
         docker.must(
             "run", "-d", "--name", llm, "--label", self.label,
+            # Listening on loopback, Ollama answers 403 to a request addressed to a host name
+            # other than localhost or its own. The agents address it by the container's name,
+            # which the proxy passes on as it is, so that name is also its host name.
+            "--hostname", llm,
             "--network", worker["network"],
             *engine._gpu_args(worker["gpus"]),
             "-v", f"{OLLAMA_DIR}:/root/.ollama",
@@ -166,6 +196,27 @@ class MarbleExperiment(Experiment):
             logs = docker.run("logs", tls)
             raise FatalRunError(f"The TLS proxy stopped: {(logs.stderr or logs.stdout).strip()[-500:]}")
         self.log(f"[ollama] ✓ TLS proxy on {llm}:{PROXY_PORT}")
+
+        self._set_step("Checking that the agents reach the model")
+        p = docker.run(
+            "run", "--rm", "--name", f"mallm-{self.id}-w{k + 1}-check", "--label", self.label,
+            "--network", worker["network"],
+            "-e", f"MARBLE_OLLAMA_PROXY_URL=https://{llm}:{PROXY_PORT}",
+            "-e", f"MODEL=ollama/{model}",
+            self.image, "python", "-c", MODEL_CHECK,
+            timeout=CHECK_TIMEOUT,
+        )
+        if self._cancel.is_set():
+            return llm
+        if "MODEL_OK" not in p.stdout:
+            found = [line for line in (p.stderr + p.stdout).splitlines() if line.startswith("MODEL_ERROR ")]
+            error = found[-1][len("MODEL_ERROR "):] if found else (p.stderr or p.stdout).strip()[-400:] or "no output"
+            logs = docker.run("logs", "--tail", "12", llm)
+            raise FatalRunError(
+                f"The agents can't get an answer from the model through the proxy: {error}\n"
+                f"Ollama's log:\n{(logs.stderr or logs.stdout).strip()[-1500:]}"
+            )
+        self.log("[ollama] ✓ The agents reach the model")
         return llm
 
     # ── Per-task capture ─────────────────────────────────────────────────────
@@ -244,9 +295,15 @@ class MarbleExperiment(Experiment):
         output = p.stdout + p.stderr
         completed = marble.TOPOLOGIES[topology][2] in output
         error = None
-        if not completed:
-            error = f"Stopped after {TASK_TIMEOUT} s without finishing." if timed_out else (
-                " ".join(output.strip().splitlines()[-3:])[-400:] or "MARBLE stopped without finishing the task.")
+        if timed_out:
+            error = f"Stopped after {TASK_TIMEOUT} s without finishing."
+        elif not completed:
+            # MARBLE retries a failed model call and prints why each time; the traceback that
+            # ends its output only says that the call returned nothing.
+            attempts = [line.split(" failed: ", 1)[1] for line in output.splitlines()
+                        if line.startswith("Attempt ") and " failed: " in line]
+            error = (f"A call to the model failed: {attempts[0][:400].strip() or 'no reason given'}" if attempts else
+                     " ".join(output.strip().splitlines()[-3:])[-400:] or "MARBLE stopped without finishing the task.")
 
         calls = []
         try:

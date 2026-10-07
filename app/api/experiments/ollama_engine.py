@@ -61,6 +61,9 @@ class OllamaExperiment(Experiment):
         docker.rm_container(cname)
         docker.must(
             "run", "-d", "--name", cname, "--label", self.label,
+            # The client addresses the server by this name. Ollama refuses (403) host names it
+            # doesn't know when it listens on loopback only; it doesn't here, but its own name is always accepted.
+            "--hostname", cname,
             "--network", self._workers[k]["network"],
             *engine._gpu_args(self._workers[k]["gpus"]),
             "-v", f"{OLLAMA_DIR}:/root/.ollama",

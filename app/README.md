@@ -101,11 +101,11 @@ Runs are saved in the results folder (`data/` by default, changeable in Settings
 
 The MARBLE code ships with the API, in `api/experiments/toolbox/marble/`, so it goes wherever `api/` is deployed. It is a copy of [pooryousefshahrooz/marble-traffic-dataset](https://github.com/pooryousefshahrooz/marble-traffic-dataset) at commit `551e071` (2026-07-17), MIT license (`LICENSE` in that folder); its own `README.md` describes the fork. It is a snapshot, not a submodule: to update it, copy the folder again from that repository. Left out of the copy: the tree and chain task configs (not collected for the dataset), MARBLE's demo configs for its database and Minecraft scenarios (`marble/configs/test_config_database`, `test_config_minecraft`, `coding_configs`), its tests, CI files, images and lock file, and `.env.template`.
 
-Before the first run, download an Ollama model with tool calls in Settings → Ollama models (the dataset was collected with `llama3.2:3b`).
+Before the first run, download an Ollama model in Settings → Ollama models (the dataset was collected with `llama3.2:3b`).
 
 How a run captures (`api/experiments/marble_engine.py`, ported from `toolbox/marble/scripts/capture_marble_dataset.py`):
 
-- Each worker keeps an Ollama container with the model loaded, on its own isolated network, and a TLS proxy sharing Ollama's network namespace. Ollama listens on its loopback only, so the proxy's port (11443) is the only thing on the network and everything on it is TLS.
+- Each worker keeps an Ollama container with the model loaded, on its own isolated network, and a TLS proxy sharing Ollama's network namespace. Ollama listens on its loopback only, so the proxy's port (11443) is the only thing on the network and everything on it is TLS. Before its first task, a worker makes one call to the model from the agents' image; if that fails, the run stops with the reason.
 - Per task: a tcpdump sidecar on that namespace, then MARBLE in a fresh container (image built from `toolbox/marble/` by `toolbox/Dockerfile.marble`). The run saves the PCAP, `captures/<stem>.agent_calls.json` (which agent made each call and when, in the dataset's format), the task's config as it ran and MARBLE's output.
 - A task that doesn't finish in 300 s, or that MARBLE doesn't complete, is kept and marked *not completed*; it is left out of the medians and the heatmap. Three in a row stop the run.
 - The database tasks (they start PostgreSQL with `docker compose`) and the research tasks (they fetch papers from the internet) can't run in the agents' container and are disabled.

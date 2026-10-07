@@ -6,9 +6,10 @@ can be tested on the other.
 
 The tasks and the agents come from toolbox/marble (MARBLE_DIR): marble-traffic-dataset, a fork
 of MARBLE / MultiAgentBench. Its task configs are multiagentbench/output_yaml_<category>_local
-for the graph topology and output_yaml_<category>_star for star. MARBLE talks to Ollama and
-uses tool calls, so the model is an Ollama model (OLLAMA_DIR), not one of the HuggingFace
-models the other experiments load. marble_engine.py runs it.
+for the graph topology and output_yaml_<category>_star for star. MARBLE talks to Ollama's API
+(through litellm, which asks it for JSON when an agent has tools), so the model is an Ollama
+model (OLLAMA_DIR), not one of the HuggingFace models the other experiments load.
+marble_engine.py runs it.
 """
 
 from __future__ import annotations
@@ -58,7 +59,7 @@ Topology = Literal["graph", "star"]
 
 class TopologyTransferConfig(RunConfig):
     model: str = Field(DEFAULT_MODEL, pattern=ollama_models.MODEL_PATTERN,
-                       description="Ollama model the agents call, downloaded in Settings. It must support tool calls.")
+                       description="Ollama model the agents call, downloaded in Settings.")
     topologies: list[Topology] = Field(["graph", "star"], min_length=1,
                                        description="Every task is captured once under each.")
     categories: list[str] = Field(..., min_length=1, description="MARBLE task categories (GET /api/topology-transfer/tasks).")

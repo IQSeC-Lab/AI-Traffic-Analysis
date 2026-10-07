@@ -148,8 +148,8 @@ export function OllamaModels() {
           </ul>
         </div>
         <p className="text-xs text-ink-3">
-          The agentic experiments need a model that supports tool calls, as llama3.2 does: its page on ollama.com is
-          tagged Tools. Without them, tasks where the agents use tools fail.
+          The agentic dataset was collected with llama3.2:3b. A much smaller model may not follow the agents&apos; instructions
+          well enough to complete the tasks.
         </p>
       </div>
       {confirmDialog}

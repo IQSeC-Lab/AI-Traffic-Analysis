@@ -116,7 +116,7 @@ export function AgenticRunForm({ experiment }: { experiment: string }) {
 
         <Section
           title="Model"
-          description="Ollama models downloaded on this machine. Every agent calls the same one, and it has to support tool calls."
+          description="Ollama models downloaded on this machine. Every agent calls the same one."
           action={
             <ButtonLink href="/settings#ollama-models" variant="secondary" size="sm">
               Download more
