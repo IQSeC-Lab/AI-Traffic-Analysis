@@ -21,7 +21,7 @@ METRIC_COLUMNS = [
 ]
 # An agentic run's captures (marble_analysis.py): the dataset's measurements, under its names
 AGENTIC_COLUMNS = [
-    "calls", "agents", "run_s",
+    "calls", "llm_calls", "agents", "run_s",
     "total_packets", "total_bytes", "task_duration", "packets_per_second", "total_bursts", "idle_time_fraction",
     "incoming_packets", "median_packet_bytes", "median_gap_ms",
     "packets", "bytes", "capture_s",

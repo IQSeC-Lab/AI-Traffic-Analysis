@@ -686,7 +686,7 @@ class Experiment:
 
         try:
             for name in self._container_names():
-                if remove(f"container {name}", "rm", "-f", name):
+                if remove(f"container {name}", "rm", "-f", "-v", name):
                     report["containers"].append(name)
 
             networks = docker.run("network", "ls", "--filter", f"label={self.label}", "--format", "{{.Name}}")
@@ -1007,7 +1007,7 @@ def remove_orphaned_resources() -> None:
             console(f"[experiments] Skipping orphan cleanup: {containers.stderr.strip()}")
             return
         for cid in containers.stdout.split():
-            if docker.run("rm", "-f", cid).returncode == 0:
+            if docker.run("rm", "-f", "-v", cid).returncode == 0:
                 removed.append(f"container {cid}")
         for net in docker.run("network", "ls", "-q", "--filter", label).stdout.split():
             if docker.run("network", "rm", net).returncode == 0:

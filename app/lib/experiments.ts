@@ -1,14 +1,26 @@
 import {
-  ChartBarDecreasing,
+  Database,
+  Globe,
   Layers,
+  Network,
   PenLine,
   Radar,
   SlidersHorizontal,
   Thermometer,
   Timer,
+  Users,
   Waypoints,
   type LucideIcon,
 } from "lucide-react";
+
+/** What an agentic experiment captures: who the agents talk to, and what one exchange with it is called. */
+export type AgenticInfo = {
+  peer: string;
+  call: { one: string; many: string };
+  failed?: string;
+  /** The PCAP also holds traffic the measurements leave out: said under the total. */
+  alsoCaptured?: string;
+};
 
 export type ExperimentInfo = {
   slug: string;
@@ -25,15 +37,17 @@ export type ExperimentInfo = {
   defaults?: { category?: string; repeat?: number };
   /** Its prompts are written in the experiment itself instead of chosen from the prompt library. */
   ownPrompts?: boolean;
-  /** Agentic AI: a capture is a MARBLE task worked on by several agents, not one prompt and its response. */
-  agentic?: boolean;
+  /** Agentic AI: a capture is a task worked on by several agents, not one prompt and its response. */
+  agentic?: AgenticInfo;
 };
 
 // A run compares at most 8 temperatures, models, network conditions or scenarios: one chart color each.
 export const MAX_VARIANTS = 8;
 
 // Client to server: the experiments from the repo (2-6), then the one the app adds.
-// Agentic AI (`agentic`): MARBLE, several agents in a graph or star topology calling one LLM server.
+// Agentic AI (`agentic`): several agents working on a task, one experiment per kind of
+// communication that is captured: with the LLM, with infrastructure, with outside endpoints, with
+// other agents, with people. The coordination topology (graph, star) is an option of each.
 export const EXPERIMENTS: ExperimentInfo[] = [
   {
     slug: "data-collector",
@@ -101,34 +115,72 @@ export const EXPERIMENTS: ExperimentInfo[] = [
     variable: { one: "scenario", many: "scenarios" },
     scenarios: true,
   },
+  // Its address and results folder are still "topology-transfer", the name it started with:
+  // runs made under that name stay where they are.
   {
     slug: "topology-transfer",
-    name: "Topology Transfer",
-    summary: "The same tasks under graph and star",
+    name: "Agent to LLM",
+    summary: "Agents calling one LLM server",
     description:
-      "Several agents work on a MARBLE task through one LLM server, and a run captures every task once per coordination topology. The topology is the only thing that changes, so a task fingerprint learned on one can be tested on the other.",
-    icon: Waypoints,
+      "Several agents work on a MARBLE task, and every call they make to the LLM server is captured. A run can capture each task under more than one coordination topology (graph, star), with the same agents and model, so the topologies can be compared.",
+    icon: Network,
     available: true,
     variable: { one: "topology", many: "topologies" },
-    agentic: true,
+    agentic: { peer: "model server", call: { one: "LLM call", many: "LLM calls" } },
   },
-  // An analysis over the captures of Topology Transfer runs, not another kind of capture. Not in the app yet.
-  // (The ten-category traffic heatmap is in the Results of every agentic run.)
   {
-    slug: "feature-importance",
-    name: "Feature Importance",
-    summary: "Top 10 Random Forest features",
+    slug: "agent-to-infrastructure",
+    name: "Agent to Infrastructure",
+    summary: "Agents working on a database",
     description:
-      "Which of the 247 traffic features identify a task. Random Forests are trained per topology over five task-grouped folds, and the ten most important features are ranked for graph and star.",
-    icon: ChartBarDecreasing,
+      "Several agents carry out a request on a PostgreSQL database (look rows up, insert, update or delete them, report over many), and every query they send is captured. The database is a mock online store, created again for every task. A run can capture each task under more than one coordination topology.",
+    icon: Database,
+    available: true,
+    variable: { one: "topology", many: "topologies" },
+    agentic: { peer: "database", call: { one: "query", many: "queries" }, failed: "Refused by the database" },
+  },
+  {
+    slug: "agent-to-endpoint",
+    name: "Agent to Endpoint",
+    summary: "Agents looking things up online",
+    description:
+      "Several agents answer a request by looking it up on public sites, and every request they send is captured: research papers on arXiv, health topics on MedlinePlus, or security advisories (the National Vulnerability Database with CISA's exploited vulnerabilities, OSV and the vendors' own pages). It is the one experiment whose containers reach the internet. A run can capture each task under more than one coordination topology.",
+    icon: Globe,
+    available: true,
+    variable: { one: "topology", many: "topologies" },
+    agentic: {
+      peer: "sites",
+      call: { one: "request", many: "requests" },
+      failed: "Failed",
+      alsoCaptured: "Traffic captured includes the agents' calls to the model, which the other figures leave out.",
+    },
+  },
+  // Not in the app yet
+  {
+    slug: "agent-to-agents",
+    name: "Agent to Agents",
+    summary: "Messages between agents",
+    description: "Agents that run apart from each other and exchange tasks and results over the network.",
+    icon: Waypoints,
     available: false,
-    agentic: true,
+    agentic: { peer: "other agents", call: { one: "message", many: "messages" } },
+  },
+  {
+    slug: "agent-to-people",
+    name: "Agent to People",
+    summary: "One agent, several people",
+    description: "One agent exchanging messages with several people through a chat service.",
+    icon: Users,
+    available: false,
+    agentic: { peer: "chat service", call: { one: "message", many: "messages" } },
   },
 ];
 
 export const CLIENT_EXPERIMENTS = EXPERIMENTS.filter((e) => !e.agentic);
 export const AGENTIC_EXPERIMENTS = EXPERIMENTS.filter((e) => e.agentic);
 export const isAgentic = (slug: string) => EXPERIMENTS.some((e) => e.slug === slug && e.agentic);
+export const agenticInfo = (slug: string): AgenticInfo =>
+  EXPERIMENTS.find((e) => e.slug === slug)?.agentic ?? { peer: "service", call: { one: "call", many: "calls" } };
 
 /** An experiment that can be opened in the app, by slug. */
 export const availableExperiment = (slug: string) => EXPERIMENTS.find((e) => e.slug === slug && e.available);

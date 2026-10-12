@@ -12,7 +12,10 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from . import analysis, custom_experiment, custom_prompts, engine, export, marble_analysis, topology_transfer
+from . import (
+    agent_endpoint, agent_infrastructure, analysis, custom_experiment, custom_prompts, engine, export, marble_analysis,
+    marble_classifier, topology_transfer,
+)
 from .base import NAME_MAX, Kind
 from .kinds import KINDS
 
@@ -48,11 +51,11 @@ def make_router(kind: Kind) -> APIRouter:
             raise HTTPException(404, f"Run not found: {run_id}")
         return run
 
-    # An agentic run's captures are whole tasks, measured differently (marble_analysis.py)
-    analyzer = marble_analysis if kind.agentic else analysis
-
     def _aggregate(run) -> dict:
-        return analyzer.run_aggregate(run.id, run.run_dir, run.variants)
+        # An agentic run's captures are whole tasks, measured differently (marble_analysis.py)
+        if kind.link:
+            return marble_analysis.run_aggregate(run.id, run.run_dir, run.variants, kind.link)
+        return analysis.run_aggregate(run.id, run.run_dir, run.variants)
 
     def _capture(run, key: str):
         found = analysis.find_capture(run.run_dir, run.variants, key)
@@ -137,6 +140,13 @@ def make_router(kind: Kind) -> APIRouter:
             }
         return found
 
+    if kind.link:
+        @router.get("/runs/{run_id}/classifier")
+        def run_classifier(run_id: str) -> dict:
+            """Whether the task category can be told from the run's traffic (marble_classifier.py). Trained in
+            the background once the run has finished: `status` says where it is, "ready" with the results."""
+            return marble_classifier.status(_get_run(run_id), kind.link)
+
     @router.get("/runs/{run_id}/captures")
     def list_captures(run_id: str) -> list[dict]:
         records = _aggregate(_get_run(run_id))["records"]
@@ -170,7 +180,9 @@ def make_router(kind: Kind) -> APIRouter:
         """A capture by its key (file stem, e.g. Qwen-Qwen2.5-7B-Instruct-p01)."""
         run = _get_run(run_id)
         index, variant = _capture(run, key)
-        return analyzer.capture_detail(run.run_dir, key, index, variant)
+        if kind.link:
+            return marble_analysis.capture_detail(run.run_dir, key, index, variant, kind.link)
+        return analysis.capture_detail(run.run_dir, key, index, variant)
 
     @router.get("/runs/{run_id}/captures/{key}/pcap")
     def download_pcap(run_id: str, key: str) -> FileResponse:
@@ -203,4 +215,4 @@ def all_active_runs() -> list[dict]:
 
 
 routers = [all_router, *(make_router(kind) for kind in KINDS.values()),
-           custom_prompts.router, custom_experiment.router, topology_transfer.router]
+           custom_prompts.router, custom_experiment.router, topology_transfer.router, agent_infrastructure.router, agent_endpoint.router]

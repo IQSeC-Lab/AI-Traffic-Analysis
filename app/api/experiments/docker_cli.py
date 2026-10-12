@@ -65,7 +65,9 @@ def exists(kind: str, name: str) -> bool:
 
 
 def rm_container(name: str) -> None:
-    run("rm", "-f", name)
+    # -v: with the volumes its image declares (PostgreSQL's data folder), which have no name
+    # or label and would otherwise stay behind, one per container
+    run("rm", "-f", "-v", name)
 
 
 def base_image(dockerfile: Path) -> str:

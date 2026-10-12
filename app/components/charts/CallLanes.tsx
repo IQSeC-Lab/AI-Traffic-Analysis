@@ -11,6 +11,8 @@ const TOP = 8;
 const ROW_H = 22;
 const AXIS_H = 26;
 
+const clip = (text: string) => (text.length > 60 ? `${text.slice(0, 59)}…` : text);
+
 /** One lane per agent: a bar for each of its calls, from when it started to when it ended. */
 export function CallLanes({
   lanes,
@@ -19,7 +21,7 @@ export function CallLanes({
   ariaLabel,
 }: {
   lanes: string[];
-  calls: [string, number, number][]; // lane, start, end
+  calls: [string, number, number, string?][]; // lane, start, end, what the call was
   formatX: (v: number) => string;
   ariaLabel: string;
 }) {
@@ -74,7 +76,7 @@ export function CallLanes({
           x={x((calls[hover][1] + calls[hover][2]) / 2)}
           y={TOP + Math.max(0, lanes.indexOf(calls[hover][0])) * ROW_H}
           width={width}
-          title={calls[hover][0]}
+          title={calls[hover][3] ? `${calls[hover][0]} · ${clip(calls[hover][3])}` : calls[hover][0]}
           rows={[
             { label: "call", value: formatX(calls[hover][2] - calls[hover][1]) },
             { label: "started at", value: formatX(calls[hover][1]) },

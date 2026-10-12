@@ -1,8 +1,12 @@
 """
-Topology Transfer, the first agentic experiment: MARBLE tasks solved by several agents
-that all call one LLM server, captured once per coordination topology. The topology is
-the only thing that changes between a task's captures, so a classifier trained on one
-can be tested on the other.
+Agent to LLM, the first agentic experiment: MARBLE tasks solved by several agents that
+all call one LLM server, and those calls are what is captured. The coordination topology
+(graph, star) is an option of the run: a task is captured once under each one chosen, and
+it is then the only thing that changes between that task's captures, so a classifier
+trained on one topology can be tested on the other.
+
+The experiment was first named Topology Transfer. Its slug, and so its API path and
+results folder, keep that name: the runs made under it stay where they are.
 
 The tasks and the agents come from toolbox/marble (MARBLE_DIR): marble-traffic-dataset, a fork
 of MARBLE / MultiAgentBench. Its task configs are multiagentbench/output_yaml_<category>_local
@@ -26,7 +30,7 @@ from pydantic import Field
 from settings import ollama_models
 from storage import MARBLE_DIR
 
-from .base import Kind, RunConfig, Variant
+from .base import Kind, Link, RunConfig, Variant
 
 MARBLE_REPO = "https://github.com/pooryousefshahrooz/marble-traffic-dataset"   # where toolbox/marble was copied from
 DEFAULT_MODEL = "llama3.2:3b"
@@ -45,7 +49,8 @@ CATEGORIES: dict[str, tuple[str, str | None]] = {
     "bargaining": ("Bargaining", None),
     "bugfix": ("Bug fix", None),
     "coding": ("Coding", None),
-    "database": ("Database", "Its tasks start PostgreSQL with docker compose, which the agents' container can't do."),
+    "database": ("Database", "Its tasks start PostgreSQL with docker compose, which the agents' container can't do. "
+                             "Agent to Infrastructure has database tasks of its own."),
     "debate": ("Debate", None),
     "deep_research": ("Deep research", None),
     "legal_review": ("Legal review", None),
@@ -55,6 +60,9 @@ CATEGORIES: dict[str, tuple[str, str | None]] = {
 }
 
 Topology = Literal["graph", "star"]
+
+# The TLS proxy in front of Ollama (marble_engine.PROXY_PORT), and MARBLE's record of each agent's calls to it
+LLM_LINK = Link(port=11443, calls="agent_calls")
 
 
 class TopologyTransferConfig(RunConfig):
@@ -147,7 +155,7 @@ def _runner(config: RunConfig) -> type:
 
 KIND = Kind(
     slug="topology-transfer",
-    title="Topology Transfer",
+    title="Agent to LLM",
     config=TopologyTransferConfig,
     variants=variants,
     variable="Topology",
@@ -155,7 +163,7 @@ KIND = Kind(
     check=check,
     runner=_runner,
     sampled=False,
-    agentic=True,
+    link=LLM_LINK,
 )
 
 
@@ -175,9 +183,11 @@ def tasks() -> dict:
         "repo": MARBLE_REPO,
         "default_model": DEFAULT_MODEL,
         "dataset_tasks": DATASET_TASKS,
+        "from_dataset": True,
+        "about": "MARBLE task categories. Each task defines its own agents, usually 3 to 5.",
         "topologies": [{"key": key, "label": label} for key, (label, _, _) in TOPOLOGIES.items()],
         "categories": [
-            {"slug": slug, "label": label, "disabled": why_not, "tasks": [] if problem else _task_ids(slug)}
+            {"slug": slug, "label": label, "disabled": why_not, "about": None, "tasks": [] if problem else _task_ids(slug)}
             for slug, (label, why_not) in CATEGORIES.items()
         ],
     }

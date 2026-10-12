@@ -12,6 +12,7 @@ import {
   type Run,
   type TrafficHeatmap,
 } from "@/lib/api";
+import { agenticInfo, type AgenticInfo } from "@/lib/experiments";
 import { formatBytes, formatMs, formatNumber, formatPercent, workerLabel } from "@/lib/format";
 import { useInterval } from "@/lib/useInterval";
 import { Alert, Loading, StatTile, buttonClass } from "@/components/ui";
@@ -20,7 +21,8 @@ import { ChartCard } from "@/components/charts/ChartCard";
 import { DivergingLegend, Heatmap } from "@/components/charts/Heatmap";
 import { SpikeTimeline } from "@/components/charts/SpikeTimeline";
 import type { Series } from "@/components/charts/scale";
-import { CategoryChart, CompareChart, GapChart, SizeChart, type Metric } from "./AnalyticsCharts";
+import { ClassifierTiles, DistributionTile } from "./AgenticClassifier";
+import { CompareChart, GapChart, SizeChart, type Metric } from "./AnalyticsCharts";
 import { modelName, variantColor } from "./RunBadge";
 
 // The measurements of an agentic run: over a task's encrypted application packets, on every connection
@@ -34,22 +36,25 @@ const VALUE_FORMAT: Record<string, (v: number) => string> = {
   total_bursts: count,
   idle_time_fraction: (v) => formatPercent(v, 0),
 };
-const METRICS: Metric[] = [
+const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+// `calls` is what the agents sent on the captured connection: LLM calls, or queries to the database
+const metricsOf = (info: AgenticInfo): Metric[] => [
   { key: "median_total_packets", label: "Packets", format: count },
   { key: "median_total_bytes", label: "Bytes", format: VALUE_FORMAT.total_bytes },
   { key: "median_task_duration", label: "Duration", format: secondsText },
   { key: "median_packets_per_second", label: "Packet rate", format: VALUE_FORMAT.packets_per_second },
   { key: "median_total_bursts", label: "Bursts", format: count },
   { key: "median_idle_time_fraction", label: "Idle time", format: VALUE_FORMAT.idle_time_fraction },
-  { key: "median_calls", label: "LLM calls", format: count },
+  { key: "median_calls", label: capital(info.call.many), format: count },
   { key: "median_agents", label: "Agents", format: count },
   { key: "median_gap_ms", label: "Packet gap", format: formatMs },
 ];
 
 type SortKey = "index" | "variant" | keyof AgenticMetrics;
+type Column = { key: keyof AgenticMetrics; label: string; format: (v: number) => string };
 const value = (v: number | null | undefined, format: (v: number) => string) => (v == null ? "—" : format(v));
-const COLUMNS: { key: keyof AgenticMetrics; label: string; format: (v: number) => string }[] = [
-  { key: "calls", label: "LLM calls", format: count },
+const columnsOf = (info: AgenticInfo): Column[] => [
+  { key: "calls", label: capital(info.call.many), format: count },
   { key: "agents", label: "Agents", format: count },
   { key: "total_packets", label: "Packets", format: count },
   { key: "total_bytes", label: "Bytes", format: VALUE_FORMAT.total_bytes },
@@ -71,6 +76,9 @@ export function AgenticResults({ run, live }: { run: Run; live: boolean }) {
   const [shown, setShown] = useState(PAGE);
   const [open, setOpen] = useState<string | null>(null);
   const base = `/${run.experiment}/runs/${run.id}`;
+  const info = agenticInfo(run.experiment);
+  const METRICS = useMemo(() => metricsOf(info), [info]);
+  const COLUMNS = useMemo(() => columnsOf(info), [info]);
   const variantOrder = useMemo(() => new Map(run.variants.map((v, i) => [v.key, i])), [run.variants]);
 
   const refresh = useCallback(() => {
@@ -106,7 +114,9 @@ export function AgenticResults({ run, live }: { run: Run; live: boolean }) {
   const variantOf = new Map(series.map((x) => [x.id, x]));
   const heroFacts: [string, string][] = [
     ["Traffic captured", formatBytes(s.total_bytes)],
-    ["LLM calls", value(s.median_calls, count)],
+    [capital(info.call.many), value(s.median_calls, count)],
+    // When another connection is captured, the model calls behind it are still worth a line
+    ...(info.call.many !== "LLM calls" ? [["LLM calls", value(s.median_llm_calls, count)] as [string, string]] : []),
     ["Agents", value(s.median_agents, count)],
     ["Duration", value(s.median_task_duration, secondsText)],
     ...(s.failed ? [["Not completed", `${s.failed}`] as [string, string]] : []),
@@ -140,7 +150,9 @@ export function AgenticResults({ run, live }: { run: Run; live: boolean }) {
               </div>
             ))}
           </dl>
-          <div className="pt-1 text-[11px] text-ink-3">Medians per task, over the completed ones of every topology</div>
+          <div className="pt-1 text-[11px] text-ink-3">
+            Medians per task, over the completed ones of every topology.{info.alsoCaptured ? ` ${info.alsoCaptured}` : ""}
+          </div>
         </div>
         <StatTile className="col-span-2" label="Packets" value={value(s.median_total_packets, count)} hint="encrypted, median" />
         <StatTile className="col-span-2" label="Bursts" value={value(s.median_total_bursts, count)} hint="direction changes, median" />
@@ -148,13 +160,14 @@ export function AgenticResults({ run, live }: { run: Run; live: boolean }) {
         <StatTile className="col-span-2" label="Packet rate" value={value(s.median_packets_per_second, VALUE_FORMAT.packets_per_second)} hint="median" />
         <CompareChart data={data} series={series} variable="topology" metrics={METRICS} height={200} className="col-span-8" />
         <HeatmapTile heatmap={data.heatmap} className="col-span-12" />
-        <CategoryChart data={data} series={series} metrics={METRICS} unit="task category" height={240} className="col-span-12" />
+        <DistributionTile captures={captures} series={series} callLabel={capital(info.call.many)} className="col-span-12" />
+        <ClassifierTiles run={run} series={series} live={live} />
         <GapChart
           data={data}
           series={series}
           height={240}
           className="col-span-7"
-          title="Time between packets from the model server"
+          title={`Time between packets from the ${info.peer}`}
           subtitle="Encrypted packets to the agents, over every connection of a task · share of gaps, log scale"
         />
         <SizeChart
@@ -170,7 +183,9 @@ export function AgenticResults({ run, live }: { run: Run; live: boolean }) {
       <div className="overflow-hidden rounded-2xl border border-hairline bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
         <div className="px-5 pt-5 pb-3">
           <h2 className="text-sm font-semibold">Captures</h2>
-          <p className="text-xs text-ink-3">One per task, repetition and topology. Click one to see each agent&apos;s calls and its packets on the wire.</p>
+          <p className="text-xs text-ink-3">
+            One per task, repetition and topology. Click one to see each agent&apos;s {info.call.many} and its packets on the wire.
+          </p>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
@@ -274,8 +289,10 @@ function HeatmapTile({ heatmap, className }: { heatmap: TrafficHeatmap; classNam
 
 const seconds = (v: number) => `${+v.toFixed(v < 10 ? 2 : 1)} s`;
 
-/** One task's capture: which agent called the model when, and the packets on the wire. */
+/** One task's capture: which agent called the service when, and the packets on the wire. */
 function AgenticCaptureDrawer({ run, captureKey, onClose }: { run: Run; captureKey: string; onClose: () => void }) {
+  const info = agenticInfo(run.experiment);
+  const COLUMNS = columnsOf(info);
   const [detail, setDetail] = useState<AgenticCaptureDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const url = `/${run.experiment}/runs/${run.id}/captures/${encodeURIComponent(captureKey)}`;
@@ -295,6 +312,8 @@ function AgenticCaptureDrawer({ run, captureKey, onClose }: { run: Run; captureK
   const m = detail?.metrics;
   const variant = run.variants.find((v) => v.key === detail?.variant);
   const incoming = detail?.timeline.filter((p) => p[2] < 0).map((p): [number, number] => [p[0], p[1]]) ?? [];
+  // What each call was, when the agents' process recorded it: the statement of a query
+  const described = detail?.calls.filter((c) => c[3]) ?? [];
   return (
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
@@ -337,27 +356,65 @@ function AgenticCaptureDrawer({ run, captureKey, onClose }: { run: Run; captureK
               </dl>
 
               <ChartCard
-                title="LLM calls by agent"
-                subtitle="Each bar is one call to the model server, from when the agent sent it to when the answer was complete"
+                title={`${capital(info.call.many)} by agent`}
+                subtitle={`Each bar is one ${info.call.one} to the ${info.peer}, from when the agent sent it to when the answer was complete`}
                 table={{
-                  columns: ["Agent", "Calls", "Packets", "Bytes"],
+                  columns: ["Agent", capital(info.call.many), "Packets", "Bytes"],
                   rows: detail.agents.map((a) => [a.agent, a.calls, a.packets.toLocaleString(), formatBytes(a.bytes)]),
                 }}
                 footer={
                   detail.unattributed_packets > 0
-                    ? `${detail.unattributed_packets.toLocaleString()} packets belong to no agent's call: MARBLE's own calls are not attributed to an agent.`
+                    ? `${detail.unattributed_packets.toLocaleString()} packets belong to no agent's ${info.call.one}${
+                        info.call.many === "LLM calls" ? ": MARBLE's own calls are not attributed to an agent." : "."
+                      }`
                     : undefined
                 }
               >
                 {detail.calls.length > 0 ? (
-                  <CallLanes lanes={detail.agents.map((a) => a.agent)} calls={detail.calls} formatX={seconds} ariaLabel="LLM calls of each agent over time" />
+                  <CallLanes
+                    lanes={detail.agents.map((a) => a.agent)}
+                    calls={detail.calls.map((c): [string, number, number, string] => [c[0], c[1], c[2], c[3]])}
+                    formatX={seconds}
+                    ariaLabel={`${capital(info.call.many)} of each agent over time`}
+                  />
                 ) : (
-                  <p className="py-10 text-center text-sm text-ink-3">No call was recorded for this task.</p>
+                  <p className="py-10 text-center text-sm text-ink-3">No {info.call.one} was recorded for this task.</p>
                 )}
               </ChartCard>
 
+              {described.length > 0 && (
+                <div className="overflow-hidden rounded-2xl border border-hairline bg-surface">
+                  <div className="px-4 pt-4 pb-2 text-xs font-medium text-ink-3">What the agents sent, as their own process recorded it</div>
+                  <div className="max-h-72 overflow-y-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead className="sticky top-0 border-y border-hairline bg-surface-2 text-ink-3">
+                        <tr>
+                          <th className="py-1.5 pr-3 pl-4 font-medium">At</th>
+                          <th className="px-3 py-1.5 font-medium">Agent</th>
+                          <th className="px-3 py-1.5 font-medium">{capital(info.call.one)}</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-[var(--hairline)]">
+                        {described.map((c, n) => (
+                          <tr key={n} className="align-top">
+                            <td className="py-1.5 pr-3 pl-4 whitespace-nowrap text-ink-3 tabular-nums">{seconds(c[1])}</td>
+                            <td className="px-3 py-1.5 whitespace-nowrap text-ink-2">{c[0]}</td>
+                            <td className="px-3 py-1.5 pr-4">
+                              <code className="font-mono break-words text-ink-2">{c[3]}</code>
+                              {c[4] && <div className="text-critical-text">{info.failed ?? "Failed"}</div>}
+                              {c[5] === "recovered" && <div className="text-ink-3">Read from an answer that was not a tool call</div>}
+                              {c[5] === "asked again" && <div className="text-ink-3">Made when the model was asked a second time</div>}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
               <ChartCard
-                title="Packets from the model server"
+                title={`Packets from the ${info.peer}`}
                 subtitle="Each stem is one encrypted packet to the agents: when it was sent and its payload size"
                 table={{
                   columns: ["Packet", "Time", "Payload"],
@@ -372,10 +429,10 @@ function AgenticCaptureDrawer({ run, captureKey, onClose }: { run: Run; captureK
                     formatX={seconds}
                     formatY={(v) => formatBytes(v)}
                     itemLabel="Packet"
-                    ariaLabel="Packets from the model server over time"
+                    ariaLabel={`Packets from the ${info.peer} over time`}
                   />
                 ) : (
-                  <p className="py-10 text-center text-sm text-ink-3">No packets from the model server in this capture.</p>
+                  <p className="py-10 text-center text-sm text-ink-3">No packets from the {info.peer} in this capture.</p>
                 )}
               </ChartCard>
 

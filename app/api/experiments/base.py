@@ -92,6 +92,15 @@ class Variant:
 
 
 @dataclass(frozen=True)
+class Link:
+    """The connection an agentic experiment captures and measures (marble_analysis.py)."""
+
+    port: int                           # the service's port: a capture's traffic is the packets to or from it
+    calls: str                          # captures/<stem>.<calls>.json: the calls its packets are attributed to
+    preamble: tuple[bytes, ...] = ()    # payloads sent in the clear before TLS starts, left out like its handshake
+
+
+@dataclass(frozen=True)
 class Kind:
     """An experiment: its URL and folder name, its settings and the variants a run compares."""
 
@@ -111,7 +120,13 @@ class Kind:
     # The engine.Experiment subclass for these settings. None: engine.Experiment.
     runner: Callable[[RunConfig], type | None] | None = None
     sampled: bool = True                          # False: its variants don't take the default temperature
-    agentic: bool = False                         # analyzed by marble_analysis.py instead of analysis.py
+    # An agentic experiment: a capture is a task several agents work on, analyzed by
+    # marble_analysis.py instead of analysis.py. This is the connection it measures.
+    link: Link | None = None
+
+    @property
+    def agentic(self) -> bool:
+        return self.link is not None
 
     @property
     def run_label(self) -> str:

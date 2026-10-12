@@ -60,16 +60,20 @@ export type OllamaModelsResponse = {
   downloads: Download[];
 };
 
-/** What a Topology Transfer run can use, from the MARBLE code on the server. */
+/** What an agentic run can use, from the MARBLE code on the server. */
 export type TaskCatalog = {
   available: boolean; // false: the MARBLE code isn't where the API looks for it
   problem: string | null;
   marble_dir: string;
   repo: string;
   default_model: string;
-  dataset_tasks: number; // the published dataset uses tasks 1 to this of each category
+  dataset_tasks: number; // tasks 1 to this of each category: the ones the published dataset uses, or all there are
+  from_dataset: boolean; // the tasks are those of the published dataset (Agent to LLM)
+  about: string; // what the tasks are
+  notice?: string; // something to know before starting a run (Agent to Endpoint reaches real websites)
+  max_workers?: number; // fewer workers than the form otherwise allows
   topologies: { key: string; label: string }[];
-  categories: { slug: string; label: string; disabled: string | null; tasks: number[] }[];
+  categories: { slug: string; label: string; disabled: string | null; about: string | null; tasks: number[] }[];
 };
 
 export type TokenStatus = {
@@ -128,9 +132,9 @@ export type Scenario = {
 export type RunConfig = {
   model?: string; // every experiment but Scalability and the Custom Experiment
   provider?: "transformers" | "ollama"; // Data Collector: the app's own server, or Ollama
-  topologies?: string[]; // Topology Transfer
-  categories?: string[]; // Topology Transfer: MARBLE task categories
-  tasks?: number[]; // Topology Transfer: task numbers run in every category
+  topologies?: string[]; // agentic: the coordination topologies each task is captured under
+  categories?: string[]; // agentic: task categories
+  tasks?: number[]; // agentic: task numbers run in every category
   models?: string[]; // Scalability: the models compared
   scenarios?: Scenario[]; // Custom Experiment
   prompt_source?: "library" | "written"; // Custom Experiment: prompt library numbers, or prompts written for it
@@ -303,7 +307,8 @@ export type AgenticMetrics = {
   incoming_packets: number;
   median_packet_bytes: number | null;
   median_gap_ms: number | null;
-  calls: number | null; // LLM calls the agents made
+  calls: number | null; // what the agents sent on the captured connection: LLM calls, or queries
+  llm_calls: number | null; // LLM calls the agents made, whatever was captured
   agents: number | null;
   run_s: number | null; // how long MARBLE ran
 };
@@ -319,6 +324,7 @@ export type AgenticStats = {
   median_total_bursts: number | null;
   median_idle_time_fraction: number | null;
   median_calls: number | null;
+  median_llm_calls: number | null;
   median_agents: number | null;
   median_gap_ms: number | null;
   median_packet_bytes: number | null;
@@ -346,6 +352,32 @@ export type AgenticAnalytics = {
   heatmap: TrafficHeatmap;
 };
 
+/** An accuracy over the folds of a cross-validation. */
+export type Spread = { mean: number; std: number; values: number[] };
+
+/** Whether the task category can be told from a finished agentic run's traffic (api/experiments/marble_classifier.py). */
+export type ClassifierResult =
+  // The run is not over, the libraries are missing, the run has too few tasks, or training raised
+  | { status: "running" | "unavailable" | "too_small" | "failed"; reason: string }
+  | { status: "waiting" | "computing"; step: string }
+  | {
+      status: "ready";
+      categories: string[];
+      chance: number; // 1 / categories
+      folds: number;
+      features: number;
+      trees: number;
+      orderings: number; // random agent orderings per task in the visibility test
+      captures: Record<string, number>; // per topology label
+      tasks: number;
+      // Trained on one topology's tasks, tested on held-out tasks under the same or another one
+      transfer: (Spread & { train: string; test: string; train_label: string; test_label: string; within: boolean })[];
+      importance: { key: string; label: string; features: { name: string; mean: number; min: number; max: number }[] }[];
+      // `visible` is how many agents are seen on average: a task with fewer agents than asked shows them all
+      visibility: { key: string; label: string; captures: number; counts: (Spread & { agents: number; visible: number })[] }[];
+      seconds: number;
+    };
+
 export type TaskStatus = "running" | "completed" | "failed";
 
 export type AgenticCapture = {
@@ -365,8 +397,10 @@ export type AgenticCapture = {
 
 export type AgenticCaptureDetail = AgenticCapture & {
   task_text: string;
-  timeline: [number, number, number][]; // seconds, payload bytes, 1 to the model server / -1 from it
-  calls: [string, number, number][]; // agent, start and end in seconds
+  timeline: [number, number, number][]; // seconds, payload bytes, 1 to the service / -1 from it
+  // agent, start and end in seconds, what was sent (a query's SQL, "" for an LLM call), whether it failed, and how
+  // the model made the call: "call", or helped when its answer was not one ("recovered", "asked again")
+  calls: [string, number, number, string, boolean, string][];
   agents: { agent: string; calls: number; packets: number; bytes: number }[];
   unattributed_packets: number;
   log_tail: string;

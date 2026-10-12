@@ -2,3 +2,6 @@ fastapi>=0.115
 uvicorn[standard]>=0.30
 huggingface_hub>=0.23
 pyyaml>=6
+# The classifier of the agentic results (experiments/marble_classifier.py); the API runs without them
+numpy>=1.26
+scikit-learn>=1.4

@@ -2,18 +2,19 @@
 Analytics for the agentic runs (marble_engine.py). They reuse the caching, grouping and
 histograms of analysis.py; what differs is what a capture is.
 
-A capture is one MARBLE task: several agents, each LLM call its own TLS connection to
-the proxy in front of Ollama. So there is no single response stream, and the measurements
-are those of marble-traffic-dataset's analysis (run_incremental_analysis.py), over the
-encrypted application packets of every connection:
-  - packets to or from the proxy's port that carry a payload, without retransmissions
+A capture is one MARBLE task: several agents, each call they make its own TLS connection
+to a service. Which service is the experiment's link (base.Link): the proxy in front of
+Ollama for Agent to LLM, the database for Agent to Infrastructure. So there is no single
+response stream, and the measurements are those of marble-traffic-dataset's analysis
+(run_incremental_analysis.py), over the encrypted application packets of every connection:
+  - packets to or from the service's port that carry a payload, without retransmissions
     and without TLS handshake, change-cipher-spec and alert records
   - a burst is a run of consecutive packets in one direction; idle time is every gap
     between packets longer than a second
 
-Which agent made each call comes from captures/<stem>.agent_calls.json, written by MARBLE
-(not from the packets), and the task and its outcome from results/<stem>.json. A capture
-without the latter is the task still running.
+Which agent made each call comes from captures/<stem>.<link.calls>.json, written by the
+agents' process (not from the packets), and the task and its outcome from
+results/<stem>.json. A capture without the latter is the task still running.
 """
 
 from __future__ import annotations
@@ -22,16 +23,17 @@ import json
 import math
 import struct
 from collections import Counter
+from functools import partial
 from pathlib import Path
 from statistics import median
 
 from . import analysis
 from .analysis import CACHE_VERSION, _PCAP_MAGIC, _gap_histogram, _median, _weighted_median
-from .base import Variant
+from .base import Link, Variant
 
-SERVICE_PORT = 11443       # the TLS proxy (marble_engine.PROXY_PORT)
 IDLE_THRESHOLD = 1.0       # seconds
-OUT, IN = 1, -1            # agents → model server, model server → agents
+OUT, IN = 1, -1            # agents → the service, the service → agents
+LABEL_CHARS = 400          # of a call's description (a query's SQL) shown with it
 
 # The measurements of the dataset's traffic heatmap, under its names. All but the last are
 # heavy-tailed, so the heatmap compares them on a log scale.
@@ -44,7 +46,7 @@ HEATMAP_METRICS = [
     ("idle_time_fraction", "Idle fraction"),
 ]
 LINEAR_METRICS = {"idle_time_fraction"}
-SUMMARY_METRICS = [name for name, _ in HEATMAP_METRICS] + ["calls", "agents", "median_gap_ms"]
+SUMMARY_METRICS = [name for name, _ in HEATMAP_METRICS] + ["calls", "llm_calls", "agents", "median_gap_ms"]
 
 
 # =============================================================================
@@ -93,7 +95,7 @@ def _is_tls_control(payload: bytes) -> bool:
     return payload[0] in (20, 21, 22) and payload[1] == 3 and payload[2] <= 4 and int.from_bytes(payload[3:5], "big") <= 18432
 
 
-def read_packets(path: Path) -> tuple[list[tuple[float, int, int]], dict]:
+def read_packets(path: Path, link: Link) -> tuple[list[tuple[float, int, int]], dict]:
     """The capture's application packets as (timestamp, direction, payload bytes), in time order,
     and what it holds in all: its packets, their bytes on the wire and its time span."""
     data = path.read_bytes()
@@ -126,9 +128,9 @@ def read_packets(path: Path) -> tuple[list[tuple[float, int, int]], dict]:
         last = t
         totals["packets"] += 1
         totals["bytes"] += orig
-        if dport == SERVICE_PORT:
+        if dport == link.port:
             direction = OUT
-        elif sport == SERVICE_PORT:
+        elif sport == link.port:
             direction = IN
         else:
             continue
@@ -138,7 +140,7 @@ def read_packets(path: Path) -> tuple[list[tuple[float, int, int]], dict]:
         if key in seen:                      # retransmission
             continue
         seen.add(key)
-        if _is_tls_control(payload):
+        if _is_tls_control(payload) or payload in link.preamble:
             continue
         kept.append((t, direction, len(payload)))
     if first is not None:
@@ -170,10 +172,10 @@ def traffic_metrics(packets: list[tuple[float, int, int]]) -> dict:
     }
 
 
-def _calls(run_dir: Path, stem: str) -> list[dict]:
-    """The task's LLM calls: [{"agent_id", "call_start", "call_end"}], in the order they started."""
+def _calls(run_dir: Path, stem: str, link: Link) -> list[dict]:
+    """The task's calls on the link: [{"agent_id", "call_start", "call_end"}], in the order they started."""
     try:
-        calls = json.loads((run_dir / "captures" / f"{stem}.agent_calls.json").read_text())
+        calls = json.loads((run_dir / "captures" / f"{stem}.{link.calls}.json").read_text())
         return sorted((c for c in calls if isinstance(c, dict) and "call_start" in c), key=lambda c: c["call_start"])
     except (OSError, ValueError, TypeError):
         return []
@@ -191,9 +193,9 @@ def assign_agents(times: list[float], calls: list[dict]) -> list[str]:
     return assigned
 
 
-def build_record(pcap: Path, result_file: Path, index: int) -> dict:
+def build_record(pcap: Path, result_file: Path, index: int, link: Link) -> dict:
     run_dir = pcap.parent.parent
-    packets, totals = read_packets(pcap)
+    packets, totals = read_packets(pcap, link)
     incoming = [p for p in packets if p[1] == IN]
     sizes = [p[2] for p in incoming]
     gaps = [(b[0] - a[0]) * 1000 for a, b in zip(incoming, incoming[1:])]
@@ -201,7 +203,7 @@ def build_record(pcap: Path, result_file: Path, index: int) -> dict:
     result = json.loads(result_file.read_text()) if result_file.exists() else None
     prompt, iteration, category = analysis._identity(run_dir, index, result or {})
     known = analysis._known_prompt(run_dir, prompt) or {}
-    calls = _calls(run_dir, pcap.stem)
+    calls = _calls(run_dir, pcap.stem, link)
     return {
         "version": CACHE_VERSION,
         "index": index,
@@ -222,6 +224,8 @@ def build_record(pcap: Path, result_file: Path, index: int) -> dict:
             "median_gap_ms": _median(gaps),
             "calls": len(calls) if result is not None else None,
             "agents": len({c.get("agent_id") for c in calls}) if result is not None else None,
+            # The agents' calls to the model, whichever link the capture is of
+            "llm_calls": (result or {}).get("calls"),
             "run_s": (result or {}).get("duration_s"),
         },
         "size_counts": dict(Counter(sizes)),
@@ -253,8 +257,8 @@ def summarize(records: list[dict]) -> dict:
     }
 
 
-def run_aggregate(run_id: str, run_dir: Path, variants: list[Variant]) -> dict:
-    return analysis.run_aggregate(run_id, run_dir, variants, build=build_record, summarize=summarize)
+def run_aggregate(run_id: str, run_dir: Path, variants: list[Variant], link: Link) -> dict:
+    return analysis.run_aggregate(run_id, run_dir, variants, build=partial(build_record, link=link), summarize=summarize)
 
 
 def heatmap(aggregate: dict, variants: list[Variant]) -> list[dict]:
@@ -310,10 +314,10 @@ def find_capture(run_dir: Path, variants: list[Variant], stem: str) -> tuple[int
     return analysis.find_capture(run_dir, variants, stem)
 
 
-def capture_detail(run_dir: Path, stem: str, index: int, variant: Variant, max_points: int = 4000) -> dict:
-    record = analysis.capture_record(run_dir, stem, index, build=build_record)
-    packets, _ = read_packets(run_dir / "captures" / f"{stem}.pcap")
-    calls = _calls(run_dir, stem)
+def capture_detail(run_dir: Path, stem: str, index: int, variant: Variant, link: Link, max_points: int = 4000) -> dict:
+    record = analysis.capture_record(run_dir, stem, index, build=partial(build_record, link=link))
+    packets, _ = read_packets(run_dir / "captures" / f"{stem}.pcap", link)
+    calls = _calls(run_dir, stem, link)
     t0 = min([p[0] for p in packets[:1]] + [float(c["call_start"]) for c in calls[:1]], default=0.0)
 
     assigned = assign_agents([p[0] for p in packets], calls)
@@ -349,7 +353,10 @@ def capture_detail(run_dir: Path, stem: str, index: int, variant: Variant, max_p
         "task_text": (known.get("text") or "").strip(),
         # [seconds since the task's first packet or call, payload bytes, 1 to the server / -1 from it]
         "timeline": [[round(p[0] - t0, 6), p[2], p[1]] for p in packets[::step]],
-        "calls": [[str(c.get("agent_id")), round(float(c["call_start"]) - t0, 4), round(float(c["call_end"]) - t0, 4)]
+        # [agent, start, end, what the call was (a query's SQL; "" for an LLM call), whether it failed, and how
+        # the model made it: "call", or with help when its answer was not one ("recovered", "asked again")]
+        "calls": [[str(c.get("agent_id")), round(float(c["call_start"]) - t0, 4), round(float(c["call_end"]) - t0, 4),
+                   str(c.get("label") or "")[:LABEL_CHARS], c.get("status") == "error", str(c.get("origin") or "call")]
                   for c in calls],
         "agents": agents,
         "unattributed_packets": sum(1 for a in assigned if not a),

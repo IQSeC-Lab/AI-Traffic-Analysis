@@ -14,7 +14,7 @@ import { SelectCard } from "./RunForm";
 
 const gb = (mb: number) => `${(mb / 1024).toFixed(1)} GB`;
 
-/** New run of an agentic experiment: MARBLE tasks, each captured once per topology. */
+/** New run of an agentic experiment: tasks for MARBLE's agents, each captured once per topology. */
 export function AgenticRunForm({ experiment }: { experiment: string }) {
   const router = useRouter();
   const [system, setSystem] = useState<SystemInfo | null>(null);
@@ -59,7 +59,7 @@ export function AgenticRunForm({ experiment }: { experiment: string }) {
   }, [experiment]);
 
   if (!system || !catalog) {
-    return error ? <Alert>{error}</Alert> : <Loading label="Reading the MARBLE tasks…" />;
+    return error ? <Alert>{error}</Alert> : <Loading label="Reading the tasks…" />;
   }
 
   const toggle = (list: string[], value: string) => (list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
@@ -73,7 +73,8 @@ export function AgenticRunForm({ experiment }: { experiment: string }) {
   const total = chosen.length * taskCount * Math.max(1, repeat) * picked.length;
 
   const onGpu = gpuMode !== "cpu" && system.gpus.length > 0;
-  const workerCount = Math.max(1, Math.min(workers, total || 1));
+  const maxWorkers = catalog.max_workers ?? 16;
+  const workerCount = Math.max(1, Math.min(workers, total || 1, maxWorkers));
   const needMb = models.find((m) => m.model === model)?.gpu_memory_mb ?? null;
   const hardware = !onGpu ? "CPU" : gpuMode === "auto" ? "Auto GPU" : gpus.length ? `GPU ${gpus.join(", ")}` : "—";
   const canStart =
@@ -113,6 +114,7 @@ export function AgenticRunForm({ experiment }: { experiment: string }) {
         {!catalog.available && (
           <Alert tone="warning">{catalog.problem ?? "The MARBLE code is not on this machine."}</Alert>
         )}
+        {catalog.notice && <Alert tone="info">{catalog.notice}</Alert>}
 
         <Section
           title="Model"
@@ -169,7 +171,7 @@ export function AgenticRunForm({ experiment }: { experiment: string }) {
 
         <Section
           title="Tasks"
-          description="MARBLE task categories. Each task defines its own agents, usually 3 to 5."
+          description={catalog.about}
           action={
             <div className="flex gap-1">
               <button
@@ -197,7 +199,10 @@ export function AgenticRunForm({ experiment }: { experiment: string }) {
               ) : (
                 <SelectCard key={c.slug} role="checkbox" selected={on} onClick={() => setCategories((cur) => toggle(cur, c.slug))}>
                   <div className="pr-6 text-sm font-medium">{c.label}</div>
-                  <div className="mt-0.5 text-xs text-ink-3 tabular-nums">{c.tasks.length} tasks</div>
+                  <div className="mt-0.5 text-xs text-ink-3 tabular-nums">
+                    {c.about ? `${c.about} · ` : ""}
+                    {c.tasks.length} tasks
+                  </div>
                 </SelectCard>
               );
             })}
@@ -206,7 +211,11 @@ export function AgenticRunForm({ experiment }: { experiment: string }) {
           <div className="mt-5 grid gap-4 border-t border-hairline pt-5 sm:grid-cols-2">
             <Field
               label="Tasks per category"
-              hint={`Tasks 1 to ${taskCount} of every chosen category. The dataset uses the first ${catalog.dataset_tasks}; these categories have up to ${maxTasks}.`}
+              hint={
+                catalog.from_dataset
+                  ? `Tasks 1 to ${taskCount} of every chosen category. The dataset uses the first ${catalog.dataset_tasks}; these categories have up to ${maxTasks}.`
+                  : `Tasks 1 to ${taskCount} of every chosen category, which have ${maxTasks} each.`
+              }
             >
               <input
                 type="number"
@@ -280,15 +289,17 @@ export function AgenticRunForm({ experiment }: { experiment: string }) {
               <input
                 type="number"
                 min={1}
-                max={16}
-                value={workers}
-                onChange={(e) => setWorkers(Math.min(16, Math.max(1, Number(e.target.value) || 1)))}
+                max={maxWorkers}
+                value={Math.min(workers, maxWorkers)}
+                disabled={maxWorkers === 1}
+                onChange={(e) => setWorkers(Math.min(maxWorkers, Math.max(1, Number(e.target.value) || 1)))}
                 className={inputClass}
               />
             </Field>
             <p className="text-xs text-ink-3 sm:pt-7">
-              Each worker has its own Ollama, network and capture, and the tasks are divided between them. Workers that share a
-              GPU slow each other down, which changes the timings you capture.
+              {maxWorkers === 1
+                ? "This experiment runs with one worker, so that the sites get one request at a time."
+                : "Each worker has its own Ollama, network and capture, and the tasks are divided between them. Workers that share a GPU slow each other down, which changes the timings you capture."}
               {onGpu && needMb != null && ` Ollama needs about ${gb(needMb)} of GPU memory per worker for this model.`}
             </p>
           </div>

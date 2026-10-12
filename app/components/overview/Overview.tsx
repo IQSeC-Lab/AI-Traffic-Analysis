@@ -169,7 +169,7 @@ export function Overview() {
       {(
         [
           ["Client to Server", "One prompt and its streamed response: the five RogueAgent experiments, and one you set up yourself.", CLIENT_EXPERIMENTS],
-          ["Agentic AI", "Several agents working on a task through one LLM server.", AGENTIC_EXPERIMENTS],
+          ["Agentic AI", "Several agents working on a task: one experiment per kind of communication captured, each with the coordination topology as an option.", AGENTIC_EXPERIMENTS],
         ] as const
       ).map(([title, text, experiments]) => (
         <Card key={title} title={title} description={text} padded={false}>

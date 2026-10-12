@@ -17,6 +17,10 @@ task out of one continuous tcpdump by time. Here every task has its own capture,
 the model server's network interface, and the agents can't reach anything but the proxy.
 Ollama stays up between tasks, as it did there, so no capture includes loading the model.
 The model is one downloaded in Settings (settings/ollama_models.py).
+
+That is Agent to LLM (topology_transfer.py). The other agentic experiments capture another
+of the agents' connections: they subclass MarbleExperiment and override the methods under
+"What an experiment changes" (infra_engine.py, endpoint_engine.py).
 """
 
 from __future__ import annotations
@@ -24,6 +28,7 @@ from __future__ import annotations
 import json
 import time
 import traceback
+from pathlib import Path
 
 from settings import ollama_models
 from storage import MARBLE_DIR, OLLAMA_DIR
@@ -37,6 +42,7 @@ from .ollama_engine import OLLAMA_IMAGE, ensure_ollama_image
 
 DOCKERFILE   = TOOLBOX_DIR / "Dockerfile.marble"   # its build context is MARBLE_DIR
 PROXY_SCRIPT = TOOLBOX_DIR / "tls_proxy.py"
+LAUNCH_SCRIPT = TOOLBOX_DIR / "marble_launch.py"   # what the launchers of the experiments with tools share
 IMAGE_REPO   = "mallm-marble"
 OLLAMA_PORT  = 11434
 PROXY_PORT   = 11443   # as in the original, so its analysis code reads these captures too
@@ -84,6 +90,72 @@ class MarbleExperiment(Experiment):
         task = self.prompts[prompt_no]
         return f"{task['category']} task {task['task_id']}"
 
+    # ── What an experiment changes ───────────────────────────────────────────
+
+    def _images(self) -> list[str]:
+        """Images the run pulls besides Ollama's; removed after it when they were not here before."""
+        return [docker.base_image(DOCKERFILE), NETSHOOT_IMAGE]
+
+    def _task_config(self, task: dict, topology: str) -> str:
+        """The task's MARBLE config (YAML), with the run's model."""
+        source = marble.task_file(task["marble_category"], topology, task["task_id"])
+        return source.read_text().replace(marble.CONFIG_MODEL, f"ollama/{self.config.model}")
+
+    def _capture_container(self, k: int, llm: str, stem: str) -> str:
+        """The container whose network interface the task is captured on, started here when it
+        only lives for the task."""
+        return llm
+
+    def _network_args(self) -> list[str]:
+        """Options of the workers' networks. Without internet, unless the experiment is about reaching it."""
+        return ["--internal"]
+
+    def _agents_network(self, k: int) -> str:
+        """The `docker run --network` of the agents' container."""
+        return self._workers[k]["network"]
+
+    # An experiment whose agents have tools of its own starts MARBLE through a launcher
+    # (toolbox/marble_<experiment>.py, with marble_launch.py), mounted at this path. None: MARBLE's main.py.
+    LAUNCHER: Path | None = None
+
+    def _launcher_args(self) -> list[str]:
+        if self.LAUNCHER is None:
+            return []
+        return ["-v", f"{LAUNCH_SCRIPT}:/marble_launch.py:ro", "-v", f"{self.LAUNCHER}:/{self.LAUNCHER.name}:ro"]
+
+    def _agents_args(self, k: int, stem: str) -> list[str]:
+        """More `docker run` options for the agents' container."""
+        return []
+
+    def _agents_command(self, config: str) -> list[str]:
+        script = "main.py" if self.LAUNCHER is None else f"/{self.LAUNCHER.name}"
+        return ["python", script, "--config_path", config]
+
+    def _task_record(self, k: int, stem: str) -> dict:
+        """More of what the task did, saved in its result."""
+        return {}
+
+    def _task_problem(self, record: dict) -> str | None:
+        """Why a task MARBLE completed still has nothing worth keeping, if so. Like a task that
+        isn't completed, three in a row stop the run."""
+        return None
+
+    def _tool_calls(self, stem: str) -> list[dict]:
+        """What the agents' tools did during the task, as the launcher logged it (MARBLE_TOOL_CALL_LOG),
+        saved beside the PCAP like their LLM calls: [{"agent_id", "call_start", "call_end", "label", "status", ...}]."""
+        log = self.results_dir / f"{stem}.tools.jsonl"
+        calls = []
+        try:
+            calls = [json.loads(line) for line in log.read_text().splitlines() if line.strip()]
+            log.unlink()
+        except (OSError, ValueError):
+            pass
+        (self.captures_dir / f"{stem}.tool_calls.json").write_text(json.dumps(calls))
+        return calls
+
+    def _after_task(self, k: int) -> None:
+        """Remove what _capture_container started."""
+
     # ── Setup ────────────────────────────────────────────────────────────────
 
     def _setup(self) -> None:
@@ -94,7 +166,7 @@ class MarbleExperiment(Experiment):
         ollama_models.reserve_mb(self.config.model, on_gpu=False)   # still downloaded?
 
         with engine._lock:
-            new = [img for img in (docker.base_image(DOCKERFILE), NETSHOOT_IMAGE) if not docker.exists("image", img)]
+            new = [img for img in self._images() if not docker.exists("image", img)]
             engine._set_pulled_images(engine._pulled_images() + new)
 
         self._set_step("Building Docker image")
@@ -124,11 +196,11 @@ class MarbleExperiment(Experiment):
         self._set_step("Preparing network" + ("s" if len(self._workers) > 1 else ""))
         for w in self._workers:
             docker.must(
-                "network", "create", "--driver", "bridge", "--internal",
+                "network", "create", "--driver", "bridge", *self._network_args(),
                 "--label", self.label, w["network"],
                 ctx=f"create network {w['network']}",
             )
-            self.log(f"[setup] ✓ Created isolated network: {w['network']}")
+            self.log(f"[setup] ✓ Created {'isolated ' if '--internal' in self._network_args() else ''}network: {w['network']}")
 
     # ── The worker's model server ────────────────────────────────────────────
 
@@ -217,7 +289,40 @@ class MarbleExperiment(Experiment):
                 f"Ollama's log:\n{(logs.stderr or logs.stdout).strip()[-1500:]}"
             )
         self.log("[ollama] ✓ The agents reach the model")
+        self._check_tools(k, llm)
         return llm
+
+    def _check_tools(self, k: int, llm: str) -> None:
+        """With a launcher: ask the model for one tool call the way an agent would. A model that
+        answers some other way would leave every task's capture empty, so the run stops here
+        with what it answered."""
+        if self.LAUNCHER is None or self._cancel.is_set():
+            return
+        self._set_step("Checking that the model calls its tools")
+        p = docker.run(
+            "run", "--rm", "--name", f"mallm-{self.id}-w{k + 1}-check", "--label", self.label,
+            "--network", self._workers[k]["network"],
+            "-e", f"MARBLE_OLLAMA_PROXY_URL=https://{llm}:{PROXY_PORT}",
+            "-e", f"MODEL=ollama/{self.config.model}",
+            *self._launcher_args(),
+            self.image, "python", f"/{self.LAUNCHER.name}", "--check-model",
+            timeout=CHECK_TIMEOUT,
+        )
+        if self._cancel.is_set():
+            return
+        lines = (p.stdout + p.stderr).splitlines()
+        answer = next((line for line in reversed(lines) if line.startswith("TOOL_")), None)
+        if answer is None:
+            raise FatalRunError(f"The check of the model's tool calls did not finish: {(p.stderr or p.stdout).strip()[-600:] or 'no output'}")
+        how, _, rest = answer.partition(" ")
+        if how == "TOOL_ERROR":
+            raise FatalRunError(
+                f"{self.config.model} did not call a tool when asked to, so its tasks would capture nothing. It answered: {rest}\n"
+                "Try a larger model, or one that the Ollama library lists with tools."
+            )
+        note = {"TOOL_OK": "", "TOOL_RECOVERED": " (in its own shape, which is read as a call)",
+                "TOOL_ASKED_AGAIN": " (when asked a second time)"}.get(how, "")
+        self.log(f"[ollama] ✓ The model calls its tools{note}: {rest[:160]}")
 
     # ── Per-task capture ─────────────────────────────────────────────────────
 
@@ -229,8 +334,11 @@ class MarbleExperiment(Experiment):
             llm = self._model_server(k)
             if self._cancel.is_set():
                 return
+            target = self._capture_container(k, llm, stem)
+            if self._cancel.is_set():
+                return
             self._set_step("Starting packet capture")
-            tc_cname = self._start_capture(k, llm, stem)
+            tc_cname = self._start_capture(k, target, stem)
             if self._cancel.is_set():
                 return
             self._set_step("Running the agents")
@@ -246,6 +354,7 @@ class MarbleExperiment(Experiment):
             self._set_step("Saving the PCAP")
             if tc_cname:
                 self._stop_capture(tc_cname)
+            self._after_task(k)
             pcap = self.captures_dir / f"{stem}.pcap"
             if pcap.exists():
                 self.log(f"[capture] ✓ PCAP → {pcap} ({pcap.stat().st_size / 1024 / 1024:.2f} MB)")
@@ -256,9 +365,12 @@ class MarbleExperiment(Experiment):
             return
         # A task can fail on its own (the agents run out of time), but not every task: then
         # something every task needs is broken, and the rest of the run would only repeat it.
-        self._failures[k] = 0 if record["completed"] else self._failures.get(k, 0) + 1
+        problem = self._task_problem(record) if record["completed"] else record["error"]
+        if problem and record["completed"]:
+            self.log(f"[agents] ⚠ {problem}")
+        self._failures[k] = self._failures.get(k, 0) + 1 if problem else 0
         if self._failures[k] >= MAX_FAILURES:
-            raise FatalRunError(f"{MAX_FAILURES} tasks in a row failed. The last one: {record['error']}")
+            raise FatalRunError(f"{MAX_FAILURES} tasks in a row failed. The last one: {problem}")
 
     def _run_task(self, k: int, variant: Variant, llm: str, index: int, stem: str) -> dict:
         """Run MARBLE on the task in a fresh container, and save what it did beside the PCAP."""
@@ -269,8 +381,7 @@ class MarbleExperiment(Experiment):
         cname = f"mallm-{self.id}-w{k + 1}-agents"
 
         config = self.configs_dir / f"{stem}.yaml"
-        source = marble.task_file(task["marble_category"], topology, task["task_id"])
-        config.write_text(source.read_text().replace(marble.CONFIG_MODEL, f"ollama/{self.config.model}"))
+        config.write_text(self._task_config(task, topology))
         # MARBLE appends one line per LLM call here: which agent made it, when it started and ended
         calls_file = self.results_dir / f"{stem}.calls.jsonl"
         calls_file.unlink(missing_ok=True)
@@ -280,12 +391,14 @@ class MarbleExperiment(Experiment):
         started = time.time()
         p = docker.run(
             "run", "--rm", "--name", cname, "--label", self.label,
-            "--network", worker["network"],
+            "--network", self._agents_network(k),
             "-v", f"{self.configs_dir}:/configs:ro",
             "-v", f"{self.results_dir}:/out",
             "-e", f"MARBLE_OLLAMA_PROXY_URL=https://{llm}:{PROXY_PORT}",
             "-e", f"MARBLE_AGENT_CALL_LOG=/out/{calls_file.name}",
-            self.image, "python", "main.py", "--config_path", f"/configs/{config.name}",
+            *self._launcher_args(),
+            *self._agents_args(k, stem),
+            self.image, *self._agents_command(f"/configs/{config.name}"),
             timeout=TASK_TIMEOUT,
         )
         ended = time.time()
@@ -329,6 +442,7 @@ class MarbleExperiment(Experiment):
             "duration_s": ended - started,
             "agents": len({c.get("agent_id") for c in calls}),
             "calls": len(calls),
+            **self._task_record(k, stem),
         }
         (self.results_dir / f"{stem}.json").write_text(json.dumps(record))
 
