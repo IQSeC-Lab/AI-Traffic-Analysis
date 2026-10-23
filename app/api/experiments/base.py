@@ -17,6 +17,7 @@ from typing import Annotated, Callable, Literal
 from pydantic import BaseModel, Field
 
 from prompt_library import store as prompt_library
+from settings import ollama_models
 from storage import MODEL_REF_PATTERN
 
 NAME_MAX = 60
@@ -25,10 +26,12 @@ MAX_VARIANTS = 8   # each variant gets its own color in the charts (--series-1 t
 # Results are read against these, so editing or deleting a prompt later never changes a past run.
 PROMPTS_FILE = "prompts.json"
 
+# Either provider's names; submit() then checks each against the run's provider
 ModelRef = Annotated[
     str,
-    Field(pattern=MODEL_REF_PATTERN,
-          description="HuggingFace model id, or a folder name in the models directory. Must be downloaded."),
+    Field(pattern=f"{MODEL_REF_PATTERN}|{ollama_models.MODEL_PATTERN}",
+          description="With the transformers provider: a HuggingFace model id, or a folder name in the models "
+                      "directory. With ollama: a model of the Ollama library, e.g. llama3.2:3b. Must be downloaded."),
 ]
 
 
@@ -62,6 +65,15 @@ class RunConfig(BaseModel):
     name: str | None = Field(None, max_length=NAME_MAX, description="Optional name to recognize the run by.")
 
 
+class ProviderConfig(RunConfig):
+    """Settings of an experiment whose models the app's own server or Ollama can serve."""
+
+    provider: Literal["transformers", "ollama"] = Field(
+        "transformers",
+        description="What serves the models: the app's own server (HuggingFace models) or Ollama (Ollama models).",
+    )
+
+
 def library_prompts(config: RunConfig) -> dict[int, dict]:
     """The prompts of a run that takes them from the prompt library: those chosen, or all."""
     numbers = [p["number"] for p in prompt_library.all_prompts()]
@@ -81,6 +93,7 @@ class Variant:
     temperature: float | None = None      # None until a run is created: then the default from Settings
     network: dict | None = None           # tc netem on the server's egress: delay_ms, jitter_ms, distribution
     columns: dict = field(default_factory=dict)   # its settings, as columns of the metrics CSV
+    provider: str | None = None           # "transformers" or "ollama". None until a run is created: then the run's
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -115,12 +128,13 @@ class Kind:
     # The run's prompts as {number: {"text", "category"}}, raising ValueError when they can't run.
     # None: prompt numbers from the prompt library (library_prompts).
     prompts: Callable[[RunConfig], dict[int, dict]] | None = None
-    # Runs that don't load a HuggingFace model in the app's own server (the Data Collector on
-    # Ollama, the agentic experiments) are run by a subclass of engine.Experiment:
+    # Runs that don't load a HuggingFace model in the app's own server (the agentic experiments)
+    # are run by a subclass of engine.Experiment:
     # GPU memory one worker needs, raising ValueError when the run can't start.
-    # None: the run's HuggingFace models must be downloaded, and the largest sets it.
+    # None: the run's models must be downloaded for its provider, and the largest sets it.
     check: Callable[[RunConfig, list[Variant]], int] | None = None
-    # The engine.Experiment subclass for these settings. None: engine.Experiment.
+    # The engine.Experiment subclass for these settings. None: engine.Experiment, or
+    # ollama_engine.OllamaExperiment for a run on the Ollama provider.
     runner: Callable[[RunConfig], type | None] | None = None
     sampled: bool = True                          # False: its variants don't take the default temperature
     # An agentic experiment: a capture is a task several agents work on, analyzed by

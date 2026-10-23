@@ -272,8 +272,14 @@ def build_agent(agent_id: str, config_path: str) -> NetworkAgent:
 
     config = Config.load(config_path)
     environment = BaseEnvironment(name="Base Environment", config=config.environment)
+    # Good Agent Bad Agent: this agent's own starting prompt, given to its container only, so the
+    # others (which read its profile from the task config) never see it. Before the agent is
+    # built: its system message is made from its profile then.
+    brief = os.environ.get("MALLM_AGENT_BRIEF", "").strip()
+    configs = [{**a, "profile": f"{str(a.get('profile') or '').strip()} {brief}".strip()} if brief and a.get("agent_id") == agent_id else a
+               for a in config.agents]
     agents = [(NetworkAgent if a.get("agent_id") == agent_id else BaseAgent)(config=a, env=environment, model=a.get("llm", config.llm))
-              for a in config.agents]
+              for a in configs]
     graph = AgentGraph(agents, config)
     for agent in agents:
         agent.set_agent_graph(graph)

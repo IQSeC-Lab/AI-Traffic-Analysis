@@ -10,11 +10,19 @@ import { Alert, ButtonLink, buttonClass, inputClass } from "@/components/ui";
 import { Section } from "./FormSection";
 import { modelName, variantColor } from "./RunBadge";
 
-/** A scenario while it is being edited: the temperature as typed, and an empty label until one is written. */
-export type ScenarioDraft = { model: string; temperature: string; network: NetworkCondition; label: string };
+type Provider = NonNullable<Scenario["provider"]>;
+// Each provider's name, and its tag beside a scenario's model (short: the model column is narrow)
+const PROVIDERS: [Provider, string, string][] = [
+  ["transformers", "Hugging Face", "HF"],
+  ["ollama", "Ollama", "Ollama"],
+];
 
-export const newScenario = (model: string, temperature: number): ScenarioDraft => ({
+/** A scenario while it is being edited: the temperature as typed, and an empty label until one is written. */
+export type ScenarioDraft = { model: string; provider: Provider; temperature: string; network: NetworkCondition; label: string };
+
+export const newScenario = (model: string, temperature: number, provider: Provider = "transformers"): ScenarioDraft => ({
   model,
+  provider,
   temperature: String(temperature),
   network: { delay_ms: 0, jitter_ms: 0, distribution: "normal" },
   label: "",
@@ -28,6 +36,7 @@ const milliseconds = (value: string) => Math.min(10000, Math.max(0, Math.round(N
 /** The scenario as the API takes it. */
 export const toScenario = (s: ScenarioDraft): Scenario => ({
   model: s.model,
+  provider: s.provider,
   temperature: temperatureOf(s),
   network: s.network,
   label: s.label.trim() || null,
@@ -75,11 +84,15 @@ export function ScenariosEditor({
   scenarios,
   onChange,
   models,
+  ollamaModels,
 }: {
   scenarios: ScenarioDraft[];
   onChange: (scenarios: ScenarioDraft[]) => void;
-  models: LocalModel[];
+  models: LocalModel[]; // Hugging Face
+  ollamaModels: LocalModel[];
 }) {
+  const lists: Record<Provider, LocalModel[]> = { transformers: models, ollama: ollamaModels };
+  const none = models.length + ollamaModels.length === 0;
   const labels = scenarioLabels(scenarios);
   const update = (i: number, change: Partial<ScenarioDraft>) => onChange(scenarios.map((s, j) => (j === i ? { ...s, ...change } : s)));
   const updateNetwork = (i: number, change: Partial<NetworkCondition>) => update(i, { network: { ...scenarios[i].network, ...change } });
@@ -87,15 +100,15 @@ export function ScenariosEditor({
   return (
     <Section
       title="Scenarios"
-      description={`What the run compares. Each scenario has its own model, sampling temperature and network condition, and every prompt is captured once in each. Up to ${MAX_VARIANTS}.`}
+      description={`What the run compares. Each scenario has its own model, from Hugging Face or Ollama, sampling temperature and network condition, and every prompt is captured once in each. Up to ${MAX_VARIANTS}.`}
       action={
         <div className="flex gap-1">
-          <ButtonLink href="/settings#models" variant="secondary" size="sm">
+          <ButtonLink href="/settings" variant="secondary" size="sm">
             Download more
           </ButtonLink>
           <button
             type="button"
-            disabled={scenarios.length >= MAX_VARIANTS || models.length === 0}
+            disabled={scenarios.length >= MAX_VARIANTS || none}
             // Starts as a copy of the last one, so only what differs has to be changed
             onClick={() => onChange([...scenarios, { ...scenarios[scenarios.length - 1], label: "" }])}
             className={buttonClass("secondary", "sm")}
@@ -105,10 +118,10 @@ export function ScenariosEditor({
         </div>
       }
     >
-      {models.length === 0 ? (
+      {none ? (
         <Alert tone="warning">
           No models downloaded yet.{" "}
-          <Link href="/settings#models" className="font-medium text-ink underline">
+          <Link href="/settings" className="font-medium text-ink underline">
             Download one in Settings
           </Link>
           .
@@ -133,18 +146,34 @@ export function ScenariosEditor({
                     <span className="flex justify-center">
                       <span className="h-2 w-2 rounded-full" style={{ background: variantColor(i) }} />
                     </span>
-                    <select
-                      value={s.model}
-                      onChange={(e) => update(i, { model: e.target.value })}
-                      className={inputClass}
-                      aria-label={`Model of scenario ${i + 1}`}
-                    >
-                      {models.map((m) => (
-                        <option key={m.folder} value={modelRef(m)}>
-                          {modelName(modelRef(m))}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="flex min-w-0 items-center gap-2">
+                      {/* Picking a model picks its provider: "<provider>|<model>", as neither name has a | */}
+                      <select
+                        value={`${s.provider}|${s.model}`}
+                        onChange={(e) => {
+                          const [provider, model] = e.target.value.split("|") as [Provider, string];
+                          update(i, { provider, model });
+                        }}
+                        className={`${inputClass} min-w-0`}
+                        aria-label={`Model of scenario ${i + 1}`}
+                      >
+                        {PROVIDERS.filter(([p]) => lists[p].length > 0).map(([p, name]) => (
+                          <optgroup key={p} label={name}>
+                            {lists[p].map((m) => (
+                              <option key={m.folder} value={`${p}|${modelRef(m)}`}>
+                                {modelName(modelRef(m))}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ))}
+                      </select>
+                      <span
+                        title={PROVIDERS.find(([p]) => p === s.provider)?.[1]}
+                        className="shrink-0 rounded-md bg-surface-2 px-1.5 py-0.5 text-[10px] font-medium text-ink-3"
+                      >
+                        {PROVIDERS.find(([p]) => p === s.provider)?.[2]}
+                      </span>
+                    </div>
                     <input
                       type="number"
                       min={0}

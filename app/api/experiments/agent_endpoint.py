@@ -87,6 +87,10 @@ AGENTS = [
 ]
 
 
+# Each category's tasks as they ship; the New run form can edit them (marble_common.saved_tasks)
+BUILTIN = {category: [{"text": text} for text in TASKS[category]] for category in CATEGORIES}
+
+
 class EndpointConfig(common.TaskRunConfig):
     @model_validator(mode="after")
     def _one_worker(self) -> EndpointConfig:
@@ -98,7 +102,8 @@ class EndpointConfig(common.TaskRunConfig):
 
 
 def prompts(config: EndpointConfig) -> dict[int, dict]:
-    return common.prompts(config, {slug: label for slug, (label, _, _) in CATEGORIES.items()}, TASKS, len(AGENTS))
+    return common.prompts(config, {slug: label for slug, (label, _, _) in CATEGORIES.items()},
+                          common.saved_tasks(KIND.slug, BUILTIN), len(AGENTS))
 
 
 def task_text(category: str, request: str) -> str:
@@ -152,8 +157,12 @@ def tasks() -> dict:
         f"What the agents look up, each kind on its own public site. The same {len(AGENTS)} agents work on every task, "
         "with a search tool and a read tool.",
         {slug: (label, about) for slug, (label, about, _) in CATEGORIES.items()},
+        common.saved_tasks(KIND.slug, BUILTIN), BUILTIN,
         max_workers=1,
         notice="These runs reach real websites: it is the only experiment whose containers have internet access. "
                "Requests are spaced out and sent one at a time, so a run has one worker, and what is captured depends "
                "on what the sites answer that day. Keep runs modest in size: the sites are not ours to load.",
     )
+
+
+common.task_editing(router, KIND.slug, BUILTIN, tasks)

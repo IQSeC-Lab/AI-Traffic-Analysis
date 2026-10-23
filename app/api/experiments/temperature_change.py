@@ -11,10 +11,10 @@ from pydantic import Field
 
 from storage import model_dir_name
 
-from .base import MAX_VARIANTS, Kind, ModelRef, RunConfig, Variant
+from .base import MAX_VARIANTS, Kind, ModelRef, ProviderConfig, Variant
 
 
-class TemperatureChangeConfig(RunConfig):
+class TemperatureChangeConfig(ProviderConfig):
     model: ModelRef
     temperatures: list[Annotated[float, Field(ge=0, le=2)]] = Field(
         [0.3, 0.7, 0.9],

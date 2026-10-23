@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: { default: "RogueAgent", template: "%s · RogueAgent" },
+  title: { default: "RogueAgent IDS", template: "%s · RogueAgent IDS" },
   description: "Run LLM traffic fingerprinting experiments",
 };
 

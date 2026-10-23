@@ -8,6 +8,9 @@ tcpdump sidecar sharing its network, a client on the isolated network, the same 
   - The client (toolbox/client_ollama.py) loads the model, then streams /api/generate. It
     needs nothing but Python, so no image is built: it runs in the plain Python image.
   - The model is one downloaded in Settings (settings/ollama_models.py).
+
+A Custom Experiment can mix the providers: its Hugging Face scenarios run as in engine.py,
+in the same run, so the image of the app's own server is built too.
 """
 
 from __future__ import annotations
@@ -45,6 +48,8 @@ class OllamaExperiment(Experiment):
         ensure_ollama_image(self)
         docker.must("pull", self._client_image, ctx=f"docker pull {self._client_image}")
         docker.run("pull", NETSHOOT_IMAGE)
+        if any(v.provider != "ollama" for v in self.variants):
+            self._build_image()
         self.log("[setup] ✓ Images ready.")
 
         self._set_step("Preparing network" + ("s" if len(self._workers) > 1 else ""))
@@ -57,6 +62,8 @@ class OllamaExperiment(Experiment):
             self.log(f"[setup] ✓ Created isolated network: {w['network']}")
 
     def _start_inference(self, k: int, variant: Variant) -> str:
+        if variant.provider != "ollama":
+            return super()._start_inference(k, variant)
         cname = f"mallm-{self.id}-w{k + 1}-llm"
         docker.rm_container(cname)
         docker.must(
@@ -75,6 +82,8 @@ class OllamaExperiment(Experiment):
         return cname
 
     def _client_command(self, variant: Variant) -> list[str]:
+        if variant.provider != "ollama":
+            return super()._client_command(variant)
         sampling = [] if variant.temperature is None else ["--temperature", str(variant.temperature)]
         return [
             "-v", f"{CLIENT_SCRIPT}:/client_ollama.py:ro",

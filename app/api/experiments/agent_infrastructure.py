@@ -42,12 +42,17 @@ DB_LINK = Link(
 )
 
 
+# Each category's tasks as they ship; the New run form can edit them (marble_common.saved_tasks)
+BUILTIN = {category: [{"text": text} for text in store_db.TASKS[category]] for category in CATEGORIES}
+
+
 class InfrastructureConfig(common.TaskRunConfig):
     pass
 
 
 def prompts(config: InfrastructureConfig) -> dict[int, dict]:
-    return common.prompts(config, {slug: label for slug, (label, _) in CATEGORIES.items()}, store_db.TASKS, len(store_db.AGENTS))
+    return common.prompts(config, {slug: label for slug, (label, _) in CATEGORIES.items()},
+                          common.saved_tasks(KIND.slug, BUILTIN), len(store_db.AGENTS))
 
 
 def task_config(task: dict, topology: str, model: str) -> str:
@@ -91,5 +96,8 @@ def tasks() -> dict:
     return common.catalog(
         f"Requests on a mock online store in PostgreSQL ({rows['customers']} customers, {rows['products']} products, "
         f"{rows['orders']} orders), created again for every task. The same {len(store_db.AGENTS)} agents work on each one.",
-        CATEGORIES,
+        CATEGORIES, common.saved_tasks(KIND.slug, BUILTIN), BUILTIN,
     )
+
+
+common.task_editing(router, KIND.slug, BUILTIN, tasks)

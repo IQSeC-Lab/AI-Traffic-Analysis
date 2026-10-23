@@ -10,6 +10,7 @@ import {
   Thermometer,
   Timer,
   Users,
+  VenetianMask,
   Waypoints,
   type LucideIcon,
 } from "lucide-react";
@@ -65,7 +66,6 @@ export const EXPERIMENTS: ExperimentInfo[] = [
     icon: Radar,
     available: true,
     options: [
-      ["Provider", "Hugging Face loads the model on the app's own server with transformers, as in the original experiment. Ollama serves an Ollama model instead, with the same prompts, network and capture."],
       ["Model", "One model. Nothing else changes between captures, so this is the baseline to compare the other experiments against."],
     ],
   },
@@ -145,7 +145,7 @@ export const EXPERIMENTS: ExperimentInfo[] = [
     variable: { one: "scenario", many: "scenarios" },
     scenarios: true,
     options: [
-      ["Scenarios", "Up to 8. Each has its own model, temperature, delay, jitter and jitter shape, and an optional label. Without a label, the results name a scenario by what sets it apart from the others."],
+      ["Scenarios", "Up to 8. Each has its own model (Hugging Face or Ollama, tagged in the list), temperature, delay, jitter and jitter shape, and an optional label. Without a label, the results name a scenario by what sets it apart from the others."],
       ["Prompts", "From the prompt library, or written in the experiment as in Custom Prompts."],
     ],
   },
@@ -237,6 +237,24 @@ export const EXPERIMENTS: ExperimentInfo[] = [
       ["Capture", "One tcpdump sidecar per agent keeps the connections that agent answers, and the sidecars' captures are merged into one PCAP per task. Every message is its own TLS connection. The agents' calls to the model, and the engine asking each agent to plan or act, are left out."],
     ],
   },
+  {
+    slug: "good-agent-bad-agent",
+    name: "Good Agent Bad Agent",
+    summary: "A team with a saboteur in it",
+    description:
+      "A team of agents works on a MARBLE task, each in its own container as in Agent to Agents, and some of them are secretly working against the others. Good and bad agents differ only in the prompt they start with, which no other agent sees. Every message they send each other is captured.",
+    icon: VenetianMask,
+    available: true,
+    variable: { one: "lineup", many: "lineups" },
+    agentic: { peer: "other agents", call: { one: "message", many: "messages" }, failed: "Not answered" },
+    options: [
+      ["Team", "How many good and how many bad agents, up to 8 in all. They take the task's roles in turn. Which agents are bad is drawn again for every task and repetition, so being bad is not tied to an agent's name or role."],
+      ["Models", "One model, called by every agent, or several. With several, the agents take them in turn and every task is captured once per lineup, each model taking its turn as the bad one, so a difference between good and bad is not a difference between models."],
+      ["Control", "On by default: every task is also captured with every agent good, the same agents and models, to compare against."],
+      ["Starting prompts", "What a good agent and what a bad agent is told, after its role in the task. Each agent gets its own in its own container. By default a bad agent keeps messaging and looks helpful while giving plausible wrong facts, flawed code or bad advice."],
+      ["Task categories", "The same as Agent to Agents: MARBLE's bug fix, debate, deep research, legal review, medical diagnosis and SWE-bench tasks, 15 each, under the graph topology."],
+    ],
+  },
   // Not in the app yet
   {
     slug: "agent-to-people",
@@ -257,6 +275,9 @@ export const agenticInfo = (slug: string): AgenticInfo =>
 
 /** An experiment that can be opened in the app, by slug. */
 export const availableExperiment = (slug: string) => EXPERIMENTS.find((e) => e.slug === slug && e.available);
+
+/** What a run of the experiment compares, in lowercase: "topology" for the agentic ones that don't say. */
+export const variableOf = (slug: string) => EXPERIMENTS.find((e) => e.slug === slug)?.variable ?? { one: "topology", many: "topologies" };
 
 export const experimentName = (slug: string) => EXPERIMENTS.find((e) => e.slug === slug)?.name ?? slug;
 

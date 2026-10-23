@@ -10,7 +10,6 @@ import { AGENTIC_EXPERIMENTS, CLIENT_EXPERIMENTS, experimentHref, runHref } from
 import { useInterval } from "@/lib/useInterval";
 import { LiveDot } from "@/components/ui";
 import { RunBadge, runTitle } from "@/components/experiments/RunBadge";
-import { ThemeToggle } from "./ThemeToggle";
 
 function NavItem({
   href,
@@ -73,19 +72,20 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
           <Radar className="h-4.5 w-4.5" strokeWidth={2} />
         </div>
         <div className="leading-tight">
-          <div className="text-sm font-semibold tracking-tight">RogueAgent</div>
+          <div className="text-sm font-semibold tracking-tight">RogueAgent IDS</div>
           <div className="text-[11px] text-ink-3">LLM traffic fingerprinting</div>
         </div>
       </Link>
 
       <nav className="space-y-0.5">
         <NavItem href="/" icon={LayoutDashboard} label="Overview" active={pathname === "/"} />
+        <NavItem href="/information" icon={Info} label="Getting started" active={pathname.startsWith("/information")} />
       </nav>
 
       {(
         [
-          ["Client to Server", CLIENT_EXPERIMENTS],
-          ["Agentic AI", AGENTIC_EXPERIMENTS],
+          ["SI Traffic Analysis", CLIENT_EXPERIMENTS],
+          ["Agentic SI Analysis", AGENTIC_EXPERIMENTS],
         ] as const
       ).map(([title, experiments]) => (
         <nav key={title} className="space-y-0.5">
@@ -154,14 +154,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         )}
 
         <nav className="space-y-0.5">
-          <NavItem href="/information" icon={Info} label="Information" active={pathname.startsWith("/information")} />
           <NavItem href="/settings" icon={Settings} label="Settings" active={pathname.startsWith("/settings")} />
         </nav>
-
-        <div className="flex items-center justify-between gap-2 px-2.5">
-          <span className="text-xs text-ink-3">Theme</span>
-          <ThemeToggle />
-        </div>
 
         {system && (
           <div className="flex items-center gap-2 px-2.5 text-[11px] text-ink-3">
@@ -191,7 +185,7 @@ export function Sidebar() {
       {/* Mobile */}
       <div className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-hairline bg-page px-4 lg:hidden">
         <Link href="/" className="flex items-center gap-2 text-sm font-semibold">
-          <Radar className="h-4 w-4 text-accent" /> RogueAgent
+          <Radar className="h-4 w-4 text-accent" /> RogueAgent IDS
         </Link>
         <button type="button" onClick={() => setOpen(true)} className="rounded-lg p-2 hover:bg-surface-2" aria-label="Open menu">
           <Menu className="h-5 w-5" />

@@ -45,7 +45,7 @@ export type ModelsResponse = {
   downloads: Download[];
 };
 
-/** A model pulled from the Ollama library: the agentic experiments, and the Data Collector on Ollama. */
+/** A model pulled from the Ollama library: the agentic experiments, and the SI Traffic Analysis ones on Ollama. */
 export type OllamaModel = {
   model: string; // as Ollama names it, tag included: llama3.2:3b
   size_bytes: number;
@@ -73,8 +73,23 @@ export type TaskCatalog = {
   notice?: string; // something to know before starting a run (Agent to Endpoint reaches real websites)
   max_workers?: number; // fewer workers than the form otherwise allows
   topologies: { key: string; label: string }[];
-  categories: { slug: string; label: string; disabled: string | null; about: string | null; tasks: number[] }[];
+  categories: {
+    slug: string;
+    label: string;
+    disabled: string | null;
+    about: string | null;
+    tasks: number[];
+    texts?: AgentTask[]; // editable tasks (Agent to Infrastructure, PLC, Endpoint): as they are now
+    builtin?: AgentTask[]; // and as they ship
+  }[];
+  editable?: { max_tasks: number; max_chars: number }; // present when the tasks can be edited
+  states?: string[]; // Agent to PLC: the states of the brewery a task can start from
+  /** Good Agent Bad Agent: the team settings' defaults and limits */
+  team?: { good: number; bad: number; max: number; max_models: number; good_prompt: string; bad_prompt: string; prompt_max: number };
 };
+
+/** A task of an agentic experiment with tasks of its own. */
+export type AgentTask = { text: string; state?: string | null };
 
 export type TokenStatus = {
   set: boolean;
@@ -124,6 +139,7 @@ export const DISTRIBUTIONS: NetworkCondition["distribution"][] = ["normal", "par
 /** One scenario of a Custom Experiment run. */
 export type Scenario = {
   model: string;
+  provider?: "transformers" | "ollama"; // what serves its model; omitted: the run's provider
   temperature: number | null; // null: the default from Settings
   network: NetworkCondition; // no delay: left as it is
   label: string | null; // null: named by what sets it apart from the others
@@ -131,11 +147,16 @@ export type Scenario = {
 
 export type RunConfig = {
   model?: string; // every experiment but Scalability and the Custom Experiment
-  provider?: "transformers" | "ollama"; // Data Collector: the app's own server, or Ollama
+  provider?: "transformers" | "ollama"; // SI Traffic Analysis: the app's own server, or Ollama
   topologies?: string[]; // agentic: the coordination topologies each task is captured under
   categories?: string[]; // agentic: task categories
   tasks?: number[]; // agentic: task numbers run in every category
-  models?: string[]; // Scalability: the models compared
+  models?: string[]; // Scalability: the models compared. Good Agent Bad Agent: the models the agents take in turn
+  good?: number; // Good Agent Bad Agent: agents working for the team
+  bad?: number; // and agents secretly working against it
+  control?: boolean; // also capture every task with every agent good
+  good_prompt?: string; // what a good agent is told, after its role in the task
+  bad_prompt?: string;
   scenarios?: Scenario[]; // Custom Experiment
   prompt_source?: "library" | "written"; // Custom Experiment: prompt library numbers, or prompts written for it
   temperatures?: number[]; // Temperature Change: 0 is greedy decoding
@@ -355,10 +376,11 @@ export type AgenticAnalytics = {
 /** An accuracy over the folds of a cross-validation. */
 export type Spread = { mean: number; std: number; values: number[] };
 
-/** Whether the task category can be told from a finished agentic run's traffic (api/experiments/marble_classifier.py). */
+/** Whether the category (or the variant) can be told from a finished run's traffic (api/experiments/marble_classifier.py). */
 export type ClassifierResult =
-  // The run is not over, the libraries are missing, the run has too few tasks, or training raised
-  | { status: "running" | "unavailable" | "too_small" | "failed"; reason: string }
+  // The run is not over, the libraries are missing, it was never calculated (or its captures changed since: POST
+  // .../classifier calculates it), the run has too few tasks, or training raised
+  | { status: "running" | "unavailable" | "missing" | "too_small" | "failed"; reason: string }
   | { status: "waiting" | "computing"; step: string }
   | {
       status: "ready";

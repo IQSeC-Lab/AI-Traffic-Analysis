@@ -27,20 +27,20 @@ ENV_TYPE = "PLC"   # the environment toolbox/marble_plc.py adds to MARBLE
 PLC_LINK = Link(port=plant.PORT, calls="tool_calls", setup=(b"HELF", b"ACKF", b"OPNF", b"CLOF"))
 
 
+# Each category's tasks as they ship, with the state of the brewery each starts from; the New run
+# form can edit them (marble_common.saved_tasks)
+BUILTIN = {category: [{"text": text, "state": state} for text, state in tasks] for category, tasks in plant.TASKS.items()}
+
+
 class PlcConfig(common.TaskRunConfig):
     tasks: list[int] = Field(list(range(1, plant.TASKS_PER_CATEGORY + 1)), min_length=1,
                              description="Task numbers run in every chosen category.")
 
 
 def prompts(config: PlcConfig) -> dict[int, dict]:
-    found = common.prompts(
-        config, {slug: label for slug, (label, _) in plant.CATEGORIES.items()},
-        {category: [text for text, _ in tasks] for category, tasks in plant.TASKS.items()},
-        len(plant.AGENTS), per_category=plant.TASKS_PER_CATEGORY,
-    )
-    for task in found.values():   # the state of the brewery the task starts from
-        task["state"] = plant.TASKS[task["marble_category"]][task["task_id"] - 1][1]
-    return found
+    """The run's tasks, each with the state of the brewery it starts from ("state")."""
+    return common.prompts(config, {slug: label for slug, (label, _) in plant.CATEGORIES.items()},
+                          common.saved_tasks(KIND.slug, BUILTIN), len(plant.AGENTS))
 
 
 def task_config(task: dict, topology: str, model: str) -> str:
@@ -84,5 +84,9 @@ def tasks() -> dict:
         "Requests on a simulated PLC (OPC UA) that runs a small brewery: three fermenters, a bottling line, a recipe "
         "and a stacklight, with physics that moves them, plus the simulator's own boiler. It is started again for "
         f"every task. The same {len(plant.AGENTS)} agents work on each one.",
-        plant.CATEGORIES, per_category=plant.TASKS_PER_CATEGORY,
+        plant.CATEGORIES, common.saved_tasks(KIND.slug, BUILTIN), BUILTIN,
+        states=list(plant.STATES),
     )
+
+
+common.task_editing(router, KIND.slug, BUILTIN, tasks, states=plant.STATES)

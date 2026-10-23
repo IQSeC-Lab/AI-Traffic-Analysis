@@ -10,7 +10,7 @@ import { useInterval } from "@/lib/useInterval";
 import { Alert, Loading, StatTile, buttonClass } from "@/components/ui";
 import type { Series } from "@/components/charts/scale";
 import { CategoryChart, CompareChart, GapChart, SizeChart } from "./AnalyticsCharts";
-import { ClassifierTiles } from "./AgenticClassifier";
+import { ClassifierTiles, type ClassifierTarget } from "./AgenticClassifier";
 import { CaptureDrawer } from "./CaptureDrawer";
 import { comparesText, modelName, runTemperature, variantColor, variantLabel } from "./RunBadge";
 
@@ -106,6 +106,10 @@ export function RunResults({ run, live }: { run: Run; live: boolean }) {
     ? run.variants.map((v, i) => ({ id: v.key, label: variantLabel(run.experiment, v), color: variantColor(i) }))
     : data.groups.map((g) => ({ id: g.key, label: g.label, color: "var(--accent)" }));
   const variantOf = new Map(run.variants.map((v, i) => [v.key, { label: variantLabel(run.experiment, v), color: variantColor(i) }]));
+  // What the forests can predict: the prompt category (not when prompts were written for the run: each is its own
+  // category, nothing to tell apart on unseen prompts) and which variant made a capture, models first
+  const targets: ClassifierTarget[] = [...(byPrompt ? [] : ["category" as const]), ...(variable && run.variants.length > 1 ? ["variant" as const] : [])];
+  if (variable?.one === "model") targets.reverse();
   const compares = comparesText(run);
   const temperature = runTemperature(run);
   const heroFacts: [string, string][] = [
@@ -185,8 +189,7 @@ export function RunResults({ run, live }: { run: Run; live: boolean }) {
           </>
         )}
         {byWorker && <WorkersTile workers={workers} total={captures.length} className="col-span-12" />}
-        {/* Prompts written for the run are each their own category: nothing to tell apart on unseen prompts */}
-        {!byPrompt && <ClassifierTiles run={run} series={series} live={live} />}
+        {targets.length > 0 && <ClassifierTiles run={run} series={series} live={live} targets={targets} />}
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-hairline bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.04)]">

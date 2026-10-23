@@ -77,15 +77,19 @@ class AgentsExperiment(MarbleExperiment):
     def _container(self, k: int, agent: str) -> str:
         return f"mallm-{self.id}-w{k + 1}-{agent}"
 
-    def _task_config(self, task: dict, topology: str) -> str:
-        return agents.task_config(super()._task_config(task, topology))
+    def _task_config(self, k: int, task: dict, topology: str) -> str:
+        return agents.task_config(super()._task_config(k, task, topology))
+
+    def _agent_args(self, k: int, agent: str) -> list[str]:
+        """More `docker run` options for one agent's container."""
+        return []
 
     def _capture_container(self, k: int, llm: str, stem: str) -> str:
         """The task's agents, each in its own container, once all of them listen."""
         task = self.prompts[self._workers[k]["current"]["prompt"]]
         # The agents read their task when they start; _run_task writes the same file again
         config = self.configs_dir / f"{stem}.yaml"
-        config.write_text(self._task_config(task, agents.TOPOLOGY))
+        config.write_text(self._task_config(k, task, agents.TOPOLOGY))
         ids = [str(a["agent_id"]) for a in yaml.safe_load(config.read_text())["agents"]]
         self._agents[k], self._stems[k] = ids, stem
         (self.results_dir / f"{stem}.tools.jsonl").unlink(missing_ok=True)
@@ -102,6 +106,7 @@ class AgentsExperiment(MarbleExperiment):
                 "-e", f"MARBLE_OLLAMA_PROXY_URL=https://{llm}:{PROXY_PORT}",
                 "-e", f"MARBLE_AGENT_CALL_LOG=/out/{stem}.calls.jsonl",
                 "-e", f"MARBLE_TOOL_CALL_LOG=/out/{stem}.tools.jsonl",
+                *self._agent_args(k, agent),
                 *self._launcher_args(),
                 self.image, "python", f"/{LAUNCHER.name}", "--serve", agent, "--config_path", f"/configs/{config.name}",
                 ctx=f"start {agent}",

@@ -6,7 +6,7 @@ import { api, type AgenticCapture, type AgenticMetrics, type ClassifierResult, t
 import { EXPERIMENTS } from "@/lib/experiments";
 import { formatBytes, formatMs, formatNumber, formatPercent } from "@/lib/format";
 import { useInterval } from "@/lib/useInterval";
-import { Spinner } from "@/components/ui";
+import { Segmented, Spinner, buttonClass } from "@/components/ui";
 import { BarList } from "@/components/charts/BarList";
 import { BoxPlot, boxOf } from "@/components/charts/BoxPlot";
 import { ChartCard } from "@/components/charts/ChartCard";
@@ -119,9 +119,13 @@ export function DistributionTile({
   );
 }
 
+/** What the forests predict: the task's or prompt's category, or (user-to-LLM runs) which variant made the capture. */
+export type ClassifierTarget = "category" | "variant";
+
 const STATE_TITLE: Record<Exclude<ClassifierResult["status"], "ready">, string> = {
   running: "Trained when the run has finished",
   unavailable: "Not installed on the server",
+  missing: "Not calculated yet",
   too_small: "Not enough to train on",
   failed: "The classifier could not be trained",
   waiting: "Waiting for other runs",
@@ -131,41 +135,101 @@ const STATE_TITLE: Record<Exclude<ClassifierResult["status"], "ready">, string> 
 /**
  * The classifier side of the dataset's analysis, on this run: whether the task category can be told from the
  * encrypted traffic, within a topology and across them, with only some agents visible, and from which measurements.
- * On a user-to-LLM run the same forests predict the prompt's category, with the run's variants in the topologies' place.
+ * On a user-to-LLM run the same forests predict the prompt's category, with the run's variants in the topologies' place,
+ * or (target "variant") which variant made the capture: model fingerprinting on a Scalability run.
  */
-export function ClassifierTiles({ run, series, live }: { run: Run; series: Series[]; live: boolean }) {
+export function ClassifierTiles({
+  run,
+  series,
+  live,
+  targets = ["category"],
+}: {
+  run: Run;
+  series: Series[];
+  live: boolean;
+  targets?: ClassifierTarget[]; // what the forests can predict on this run, the first shown first
+}) {
   const experiment = EXPERIMENTS.find((e) => e.slug === run.experiment);
   const agentic = Boolean(experiment?.agentic);
   const unit = agentic ? "task" : "prompt";
   const variable = experiment?.variable; // what the run compares; none in the Data Collector
-  const title = agentic ? "Task fingerprinting" : "Prompt fingerprinting";
-  const [result, setResult] = useState<ClassifierResult | null>(null);
-  const url = `/${run.experiment}/runs/${run.id}/classifier`;
-  const refresh = useCallback(() => {
-    api<ClassifierResult>(url)
-      .then(setResult)
-      .catch((e: Error) => setResult({ status: "failed", reason: e.message }));
-  }, [url]);
-  useEffect(refresh, [refresh, live]);
+  const what = variable?.one ?? "setting";
+  const whatMany = variable?.many ?? "settings";
+  const [target, setTarget] = useState<ClassifierTarget>(targets[0]);
+  const byVariant = target === "variant";
+  const title = agentic ? "Task fingerprinting" : byVariant ? `${capital(what)} fingerprinting` : "Prompt fingerprinting";
+  // Per target, so switching back is instant and a late answer never lands under the other one
+  const [results, setResults] = useState<Partial<Record<ClassifierTarget, ClassifierResult>>>({});
+  const result = results[target];
+  const base = `/${run.experiment}/runs/${run.id}/classifier`;
+  const load = useCallback(
+    (t: ClassifierTarget) => {
+      const save = (found: ClassifierResult) => setResults((all) => ({ ...all, [t]: found }));
+      api<ClassifierResult>(`${base}?target=${t}`)
+        .then(save)
+        .catch((e: Error) => save({ status: "failed", reason: e.message }));
+    },
+    [base],
+  );
+  // Every target at once: asking is what starts a target's forests on the server, so a switch never waits for them to begin
+  const all = targets.join(",");
+  useEffect(() => all.split(",").forEach((t) => load(t as ClassifierTarget)), [load, all, live]);
   const pending = result?.status === "computing" || result?.status === "waiting";
-  useInterval(refresh, pending ? 3000 : null);
+  useInterval(() => load(target), pending ? 3000 : null);
+
+  // Runs that complete are trained on their own; older ones (and failed trainings) when asked, every target at once
+  const [starting, setStarting] = useState(false);
+  const calculate = () => {
+    setStarting(true);
+    api(base, { method: "POST" })
+      .then(() => all.split(",").forEach((t) => load(t as ClassifierTarget)))
+      .catch((e: Error) => setResults((found) => ({ ...found, [target]: { status: "failed", reason: e.message } })))
+      .finally(() => setStarting(false));
+  };
+
+  // It changes both tiles, so it sits above them
+  const picker =
+    targets.length > 1 ? (
+      <div className="col-span-12 flex items-center gap-2 text-xs text-ink-3">
+        The classifier predicts
+        <Segmented
+          value={target}
+          onChange={(t) => {
+            setTarget(t);
+            load(t); // what it shows may be a step that has moved on
+          }}
+          options={targets.map((t) => ({ value: t, label: t === "variant" ? capital(what) : "Prompt category" }))}
+        />
+      </div>
+    ) : null;
 
   if (!result) return null;
   if (result.status !== "ready") {
     return (
-      <div className="col-span-12 rounded-2xl border border-hairline bg-surface p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-        <div className="text-sm font-semibold">{title}</div>
-        <div className="mt-0.5 text-xs text-ink-3">
-          {agentic
-            ? "Whether a classifier can tell the task category from the encrypted traffic alone, on tasks it has not seen."
-            : "Whether a classifier can tell a prompt's category from the sizes and timing of its packets alone, on prompts it has not seen."}
+      <>
+        {picker}
+        <div className="col-span-12 rounded-2xl border border-hairline bg-surface p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
+          <div className="text-sm font-semibold">{title}</div>
+          <div className="mt-0.5 text-xs text-ink-3">
+            {agentic
+              ? "Whether a classifier can tell the task category from the encrypted traffic alone, on tasks it has not seen."
+              : byVariant
+                ? `Whether a classifier can tell which ${what} made a capture from the sizes and timing of its packets alone, on prompts it has not seen.`
+                : "Whether a classifier can tell a prompt's category from the sizes and timing of its packets alone, on prompts it has not seen."}
+          </div>
+          <div className="mt-4 flex items-center gap-2 text-sm font-medium">
+            {pending && <Spinner />}
+            {STATE_TITLE[result.status]}
+          </div>
+          <p className="mt-1 max-w-3xl text-sm text-ink-2">{"step" in result ? `${result.step}…` : result.reason}</p>
+          {(result.status === "missing" || result.status === "failed") && (
+            <button type="button" onClick={calculate} disabled={starting} className={`mt-4 ${buttonClass("primary", "sm")}`}>
+              {starting && <Spinner />}
+              {result.status === "failed" ? "Calculate again" : "Calculate"}
+            </button>
+          )}
         </div>
-        <div className="mt-4 flex items-center gap-2 text-sm font-medium">
-          {pending && <Spinner />}
-          {STATE_TITLE[result.status]}
-        </div>
-        <p className="mt-1 max-w-3xl text-sm text-ink-2">{"step" in result ? `${result.step}…` : result.reason}</p>
-      </div>
+      </>
     );
   }
 
@@ -175,7 +239,9 @@ export function ClassifierTiles({ run, series, live }: { run: Run; series: Serie
 
   // Trained on each topology: tested on its own held-out tasks, and on the same tasks under the other topologies
   const trained = [...new Set(result.transfer.map((t) => t.train))];
-  const same = variable ? `Same ${variable.one}` : `Held-out ${unit}s`;
+  const same = variable && !byVariant ? `Same ${variable.one}` : `Held-out ${unit}s`;
+  // Telling the variants apart is one forest over all of them
+  const forestLabel = (label: string) => (byVariant ? `All ${whatMany}` : label);
   const conditions = result.transfer.some((t) => !t.within) ? [same, `Another ${variable?.one}`] : [same];
   // Agentic runs put agent visibility beside it; a user-to-LLM run with one variant, the importances
   const single = !agentic && result.importance.length === 1;
@@ -185,7 +251,7 @@ export function ClassifierTiles({ run, series, live }: { run: Run; series: Serie
     const mean = (values: number[]) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : null);
     return {
       id: key,
-      label: `Trained on ${mine[0].train_label}`,
+      label: byVariant ? forestLabel(mine[0].train_label) : `Trained on ${mine[0].train_label}`,
       color: colorOf(key),
       values: cells.map((found) => mean(found.map((t) => t.mean))),
       spreads: cells.map((found) => mean(found.map((t) => t.std))),
@@ -203,20 +269,25 @@ export function ClassifierTiles({ run, series, live }: { run: Run; series: Serie
 
   return (
     <>
+      {picker}
       <ChartCard
         title={title}
-        subtitle={`Balanced accuracy of a Random Forest predicting the ${unit} category from ${result.features} measurements of a capture's packets, tested on ${unit}s it has not seen (${setup}). Whiskers: one standard deviation over the folds.`}
+        subtitle={`Balanced accuracy of a Random Forest predicting the ${byVariant ? what : `${unit} category`} from ${result.features} measurements of a capture's packets, tested on ${unit}s it has not seen (${setup}). Whiskers: one standard deviation over the folds.`}
         legend={transferSeries}
         legendShape="rect"
         height={240}
         className={agentic || single ? "col-span-5" : "col-span-12"}
         table={{
           columns: ["Trained on", "Tested on", "Accuracy", "Std. deviation", "Per fold"],
-          rows: result.transfer.map((t) => [t.train_label, t.test_label, percent1(t.mean), percent1(t.std), t.values.map(percent).join(", ")]),
+          rows: result.transfer.map((t) => [forestLabel(t.train_label), forestLabel(t.test_label), percent1(t.mean), percent1(t.std), t.values.map(percent).join(", ")]),
         }}
-        footer={`${result.tasks} ${unit}s in ${result.categories.length} categories, ${Object.entries(result.captures)
-          .map(([label, n]) => `${n} captures under ${label}`)
-          .join(" and ")}. Trained in ${formatNumber(result.seconds)} s.`}
+        footer={
+          byVariant
+            ? `${result.tasks} prompts, ${result.categories.length} ${whatMany}, ${Object.values(result.captures).reduce((a, b) => a + b, 0)} captures. Trained in ${formatNumber(result.seconds)} s.`
+            : `${result.tasks} ${unit}s in ${result.categories.length} categories, ${Object.entries(result.captures)
+                .map(([label, n]) => `${n} captures under ${label}`)
+                .join(" and ")}. Trained in ${formatNumber(result.seconds)} s.`
+        }
       >
         <GroupedColumns
           categories={conditions}
@@ -225,7 +296,13 @@ export function ClassifierTiles({ run, series, live }: { run: Run; series: Serie
           max={1}
           reference={chance}
           height={240}
-          ariaLabel={variable ? `Balanced accuracy within and across ${variable.many}` : `Balanced accuracy on held-out ${unit}s`}
+          ariaLabel={
+            byVariant
+              ? `Balanced accuracy telling the ${whatMany} apart on held-out prompts`
+              : variable
+                ? `Balanced accuracy within and across ${variable.many}`
+                : `Balanced accuracy on held-out ${unit}s`
+          }
         />
       </ChartCard>
 
@@ -259,18 +336,18 @@ export function ClassifierTiles({ run, series, live }: { run: Run; series: Serie
 
       <ChartCard
         title="What the classifier relies on"
-        subtitle={`The ten measurements, of ${result.features}, that the forests lean on most${variable ? ` under each ${variable.one}` : ""}: their share of the forests' decisions (mean decrease in impurity), averaged over the folds.${agentic ? "" : " Outgoing packets are the request, so their sizes follow the prompt's length."}`}
+        subtitle={`The ten measurements, of ${result.features}, that the forests lean on most${variable && !byVariant ? ` under each ${variable.one}` : ""}: their share of the forests' decisions (mean decrease in impurity), averaged over the folds.${agentic || byVariant ? "" : " Outgoing packets are the request, so their sizes follow the prompt's length."}`}
         height={300}
         className={single ? "col-span-7" : "col-span-12"}
         table={{
-          columns: [variable ? capital(variable.one) : "Model", "Rank", "Measurement", "Importance", "Lowest fold", "Highest fold"],
-          rows: result.importance.flatMap((t) => t.features.map((f, i) => [t.label, i + 1, f.name, percent1(f.mean), percent1(f.min), percent1(f.max)])),
+          columns: [byVariant ? "Trained on" : variable ? capital(variable.one) : "Model", "Rank", "Measurement", "Importance", "Lowest fold", "Highest fold"],
+          rows: result.importance.flatMap((t) => t.features.map((f, i) => [forestLabel(t.label), i + 1, f.name, percent1(f.mean), percent1(f.min), percent1(f.max)])),
         }}
       >
         <div className="grid gap-8" style={{ gridTemplateColumns: `repeat(${Math.min(result.importance.length, 4)}, minmax(0, 1fr))` }}>
           {result.importance.map((t) => (
             <div key={t.key} className="min-w-0">
-              <div className="mb-1 text-xs font-medium text-ink-2">{t.label}</div>
+              <div className="mb-1 text-xs font-medium text-ink-2">{forestLabel(t.label)}</div>
               <BarList
                 rows={t.features.map((f) => ({
                   id: f.name,
@@ -281,7 +358,7 @@ export function ClassifierTiles({ run, series, live }: { run: Run; series: Serie
                 }))}
                 format={percent1}
                 height={280}
-                ariaLabel={`The ten most important measurements for ${t.label}`}
+                ariaLabel={`The ten most important measurements for ${forestLabel(t.label)}`}
               />
             </div>
           ))}

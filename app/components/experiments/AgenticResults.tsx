@@ -12,7 +12,7 @@ import {
   type Run,
   type TrafficHeatmap,
 } from "@/lib/api";
-import { agenticInfo, type AgenticInfo } from "@/lib/experiments";
+import { agenticInfo, variableOf, type AgenticInfo } from "@/lib/experiments";
 import { formatBytes, formatMs, formatNumber, formatPercent, workerLabel } from "@/lib/format";
 import { useInterval } from "@/lib/useInterval";
 import { Alert, Loading, StatTile, buttonClass } from "@/components/ui";
@@ -77,6 +77,7 @@ export function AgenticResults({ run, live }: { run: Run; live: boolean }) {
   const [open, setOpen] = useState<string | null>(null);
   const base = `/${run.experiment}/runs/${run.id}`;
   const info = agenticInfo(run.experiment);
+  const variable = variableOf(run.experiment).one;
   const METRICS = useMemo(() => metricsOf(info), [info]);
   const COLUMNS = useMemo(() => columnsOf(info), [info]);
   const variantOrder = useMemo(() => new Map(run.variants.map((v, i) => [v.key, i])), [run.variants]);
@@ -123,7 +124,7 @@ export function AgenticResults({ run, live }: { run: Run; live: boolean }) {
   ];
   const headers: { key: SortKey; label: string }[] = [
     { key: "index", label: "Task" },
-    { key: "variant", label: "Topology" },
+    { key: "variant", label: capital(variable) },
     ...COLUMNS,
   ];
 
@@ -151,14 +152,14 @@ export function AgenticResults({ run, live }: { run: Run; live: boolean }) {
             ))}
           </dl>
           <div className="pt-1 text-[11px] text-ink-3">
-            Medians per task, over the completed ones of every topology.{info.alsoCaptured ? ` ${info.alsoCaptured}` : ""}
+            Medians per task, over the completed ones of every {variable}.{info.alsoCaptured ? ` ${info.alsoCaptured}` : ""}
           </div>
         </div>
         <StatTile className="col-span-2" label="Packets" value={value(s.median_total_packets, count)} hint="encrypted, median" />
         <StatTile className="col-span-2" label="Bursts" value={value(s.median_total_bursts, count)} hint="direction changes, median" />
         <StatTile className="col-span-2" label="Idle time" value={value(s.median_idle_time_fraction, VALUE_FORMAT.idle_time_fraction)} hint="gaps over 1 s, median" />
         <StatTile className="col-span-2" label="Packet rate" value={value(s.median_packets_per_second, VALUE_FORMAT.packets_per_second)} hint="median" />
-        <CompareChart data={data} series={series} variable="topology" metrics={METRICS} height={200} className="col-span-8" />
+        <CompareChart data={data} series={series} variable={variable} metrics={METRICS} height={200} className="col-span-8" />
         <HeatmapTile heatmap={data.heatmap} className="col-span-12" />
         <DistributionTile captures={captures} series={series} callLabel={capital(info.call.many)} className="col-span-12" />
         <ClassifierTiles run={run} series={series} live={live} />
@@ -184,7 +185,7 @@ export function AgenticResults({ run, live }: { run: Run; live: boolean }) {
         <div className="px-5 pt-5 pb-3">
           <h2 className="text-sm font-semibold">Captures</h2>
           <p className="text-xs text-ink-3">
-            One per task, repetition and topology. Click one to see each agent&apos;s {info.call.many} and its packets on the wire.
+            One per task, repetition and {variable}. Click one to see each agent&apos;s {info.call.many} and its packets on the wire.
           </p>
         </div>
         <div className="overflow-x-auto">
@@ -321,7 +322,7 @@ function AgenticCaptureDrawer({ run, captureKey, onClose }: { run: Run; captureK
         <div className="flex items-start justify-between gap-4 border-b border-hairline bg-surface px-6 py-4">
           <div>
             <div className="text-xs font-medium text-ink-3">
-              {variant ? `${variant.label} topology` : "Capture"}
+              {variant ? (variableOf(run.experiment).one === "topology" ? `${variant.label} topology` : variant.label) : "Capture"}
               {detail?.worker != null && ` · ${workerLabel(detail.worker, detail.gpus)}`}
             </div>
             <h2 className="text-lg font-semibold tracking-tight">

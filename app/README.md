@@ -18,7 +18,7 @@ app/                              # project root
 │       ├── scalability.py        # 5, ported from ../5-Scalability
 │       ├── delay.py              # 6, ported from ../6-Delay
 │       ├── custom_experiment.py  # not in the repo: scenarios with every setting of the others
-│       ├── ollama_engine.py      # the same capture with Ollama as the server (Data Collector's Ollama provider)
+│       ├── ollama_engine.py      # the same capture with Ollama as the server (the Ollama provider)
 │       ├── topology_transfer.py  # agentic, Agent to LLM: MARBLE tasks, once per coordination topology
 │       ├── marble_engine.py      # how an agentic run captures a task
 │       ├── agent_infrastructure.py  # agentic, Agent to Infrastructure: requests on a database
@@ -69,7 +69,7 @@ Open http://localhost:3000. API docs: http://localhost:3000/api/docs.
 
 ## Using it
 
-The sidebar has two sections. **Client to Server** lists six experiments, one prompt and its streamed response per capture: the five from the repo (Data Collector, Temperature Change, Custom Prompts, Scalability and Delay) and the Custom Experiment, which you set up yourself. **Agentic AI** lists the experiments where several agents work on a task, one per kind of communication that is captured: Agent to LLM, Agent to Infrastructure and Agent to Endpoint (see [Agentic AI](#agentic-ai)). Agent to Agents (agents that run apart from each other) and Agent to People (one agent, several people on a chat service) are listed but not in the app yet.
+The sidebar has two sections. **SI Traffic Analysis** lists six experiments, one prompt and its streamed response per capture: the five from the repo (Data Collector, Temperature Change, Custom Prompts, Scalability and Delay) and the Custom Experiment, which you set up yourself. **Agentic SI Analysis** lists the experiments where several agents work on a task, one per kind of communication that is captured: Agent to LLM, Agent to Infrastructure and Agent to Endpoint (see [Agentic SI Analysis](#agentic-si-analysis)). Agent to Agents (agents that run apart from each other) and Agent to People (one agent, several people on a chat service) are listed but not in the app yet.
 
 | Page | What it's for |
 | --- | --- |
@@ -103,9 +103,9 @@ The Delay experiment, and a Custom Experiment scenario with a delay, need the ho
 
 Runs are saved in the results folder (`data/` by default, changeable in Settings), so the history survives restarts; a run that was active when the API stopped shows as *interrupted*.
 
-**Provider (Data Collector).** *Hugging Face* is the app's own server loading a HuggingFace model with transformers, as in the original script. *Ollama* serves an Ollama model instead (`api/experiments/ollama_engine.py`): a fresh `ollama/ollama` container per prompt with the Ollama models folder mounted, and a client that loads the model, then streams `/api/generate`. The prompts, the isolated network, the capture and the results are the same. Ollama models are downloaded in Settings → Ollama models; the app pulls them from the Ollama library itself (`api/settings/ollama_models.py`), so nothing has to be installed on the host. The `ollama/ollama` image is pulled on the first run and kept.
+**Provider (every SI Traffic Analysis experiment).** *Hugging Face* is the app's own server loading a HuggingFace model with transformers, as in the original scripts. *Ollama* serves an Ollama model instead (`api/experiments/ollama_engine.py`): a fresh `ollama/ollama` container per prompt with the Ollama models folder mounted, and a client that loads the model, then streams `/api/generate`. The prompts, the isolated network, the capture and the results are the same. A run takes all its models from one provider, except the Custom Experiment: each of its scenarios has its own, set by the model picked, so one run can compare a model on the app's own server with one on Ollama. Keep in mind that the two servers stream their responses in different formats, so such a comparison measures the server as well as the model. Ollama models are downloaded in Settings → Ollama models; the app pulls them from the Ollama library itself (`api/settings/ollama_models.py`), so nothing has to be installed on the host. The `ollama/ollama` image is pulled on the first run and kept.
 
-### Agentic AI
+### Agentic SI Analysis
 
 **Agent to LLM** runs [MARBLE](https://github.com/pooryousefshahrooz/marble-traffic-dataset) tasks: several agents (usually 3 to 5) work on a task, and every LLM call of every agent goes to one Ollama server. Those calls are the only traffic captured: the agents pass each other messages inside MARBLE's process, never over the network.
 

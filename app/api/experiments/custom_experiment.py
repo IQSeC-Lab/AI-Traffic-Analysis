@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field
 from settings import store as settings_store
 from storage import DATA_DIR, model_dir_name
 
-from .base import MAX_VARIANTS, NAME_MAX, Kind, ModelRef, RunConfig, Variant, library_prompts
+from .base import MAX_VARIANTS, NAME_MAX, Kind, ModelRef, ProviderConfig, Variant, library_prompts
 from .custom_prompts import MAX_PROMPTS, PromptText, numbered, saved_prompts, saved_prompts_router
 from .delay import NetworkCondition, describe
 
@@ -28,6 +28,9 @@ SAVED_FILE = DATA_DIR / "custom-experiment-prompts.json"
 
 class Scenario(BaseModel):
     model: ModelRef
+    provider: Literal["transformers", "ollama"] | None = Field(
+        None, description="What serves this scenario's model. Omit to use the run's provider.",
+    )
     temperature: float | None = Field(
         None, ge=0, le=2,
         description="Sampling temperature, 0 to 2 (0 is greedy decoding). Omit to use the default from Settings.",
@@ -42,7 +45,7 @@ class Scenario(BaseModel):
     )
 
 
-class CustomExperimentConfig(RunConfig):
+class CustomExperimentConfig(ProviderConfig):
     scenarios: list[Scenario] = Field(
         ...,
         min_length=1,
@@ -106,6 +109,7 @@ def variants(config: CustomExperimentConfig) -> list[Variant]:
             model=s.model,
             temperature=t,
             network=s.network.model_dump() if s.network.delay_ms else None,
+            provider=s.provider or config.provider,
             columns={
                 "scenario": label,
                 "model": s.model,

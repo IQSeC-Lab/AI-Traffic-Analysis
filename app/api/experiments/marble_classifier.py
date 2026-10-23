@@ -5,7 +5,9 @@ This is the classifier side of the dataset's analysis (the plots bundle's
 marble_top10_rf_feature_importance and marble_topology_transfer_agent_visibility), run on
 the run's own captures. In a user-to-LLM run a prompt plays the task's part and the
 variant (temperature, model, network condition, scenario) the topology's; there are no
-agents, so no visibility test.
+agents, so no visibility test. A user-to-LLM run can also be asked which variant made a
+capture (target "variant": model fingerprinting on a Scalability run), with the same
+forests and the same folds by prompt.
 
 Each capture becomes 247 measurements of its packets' timing, direction and size
 (features_from_arrays, ported from marble-traffic-dataset's run_incremental_analysis.py).
@@ -23,7 +25,9 @@ is left out.
 numpy and scikit-learn are imported when first needed, so the API runs without them and
 the results page says what is missing. The work runs in a background thread, one run at a
 time and only while no run is capturing (a forest training on the host would change the
-timings being captured), and its result is saved in the run's analysis folder.
+timings being captured), and its result is saved in the run's analysis folder. A run is
+trained when it completes (engine.py calls start), and older runs when their results page
+asks (Calculate); opening a page never starts training by itself.
 """
 
 from __future__ import annotations
@@ -36,6 +40,8 @@ import time
 import traceback
 from importlib.util import find_spec
 from pathlib import Path
+
+from console import console
 
 from . import analysis, engine, marble_analysis
 from .base import Link, Variant
@@ -52,7 +58,7 @@ IDLE_THRESHOLD = marble_analysis.IDLE_THRESHOLD
 SUMMARY_NAMES = ("mean", "std", "min", "q25", "median", "q75", "max")
 
 _lock = threading.Lock()
-_jobs: dict[str, dict] = {}        # run id → {"status", "step"} while its thread works
+_jobs: dict[tuple[str, str], dict] = {}   # (run id, target) → {"status", "step"} while its thread works
 _turn = threading.Lock()           # one run's forests at a time
 
 
@@ -289,16 +295,23 @@ def _folds(rows: list[dict]) -> int:
     return min(FOLDS, min((len(found) for found in tasks.values()), default=0))
 
 
-def compute(run_dir: Path, records: list[dict], variants: list[Variant], link: Link | None, job: dict) -> dict:
-    """`link` None: a user-to-LLM run."""
+def compute(run_dir: Path, records: list[dict], variants: list[Variant], link: Link | None, job: dict,
+            target: str = "category") -> dict:
+    """`link` None: a user-to-LLM run. `target` "variant": which variant made each capture."""
     started = time.monotonic()
     rows = _load(run_dir, records, link, job) if link else _load_prompts(run_dir, records, job)
-    return {**fit(rows, variants, job, agentic=link is not None), "seconds": round(time.monotonic() - started, 1)}
+    label = "category"
+    if target == "variant":
+        # The variant is the label; every capture in one forest, still tested on prompts it has not seen
+        for row in rows:
+            row["category"], row["topology"] = row["topology"], "all"
+        variants, label = [Variant(key="all", label="All captures", model="")], "compared setting"
+    return {**fit(rows, variants, job, agentic=link is not None, label=label), "seconds": round(time.monotonic() - started, 1)}
 
 
-def fit(rows: list[dict], variants: list[Variant], job: dict, agentic: bool = True) -> dict:
+def fit(rows: list[dict], variants: list[Variant], job: dict, agentic: bool = True, label: str = "category") -> dict:
     """The forests on rows of _load or _load_prompts: each with its variant ("topology"),
-    category, task or prompt ("group"), features ("full") and, from _load, its agents."""
+    label ("category"), task or prompt ("group"), features ("full") and, from _load, its agents."""
     import numpy as np
     from sklearn.metrics import balanced_accuracy_score
     from sklearn.model_selection import StratifiedGroupKFold
@@ -309,12 +322,14 @@ def fit(rows: list[dict], variants: list[Variant], job: dict, agentic: bool = Tr
     by_topology = {key: found for key, found in by_topology.items() if found}
     labels = {v.key: v.label for v in variants}
     if len(categories) < 2:
-        return {"status": "too_small", "reason": f"A classifier needs completed {unit}s of at least two categories to tell apart."}
+        labels_word = "categories" if label == "category" else f"{label}s"
+        return {"status": "too_small", "reason": f"A classifier needs completed {unit}s of at least two {labels_word} to tell apart."}
     folds = min((_folds(found) for found in by_topology.values()), default=0)
     if folds < MIN_FOLDS:
+        under = f" under every {setting}" if len(by_topology) > 1 else ""
         return {"status": "too_small",
                 "reason": f"A classifier is tested on {unit}s it has not seen, which takes at least {MIN_FOLDS} completed {unit}s "
-                          f"in every category under every {setting} ({FOLDS} for the dataset's five folds)."}
+                          f"in every {label}{under} ({FOLDS} for the dataset's five folds)."}
 
     names = list(rows[0]["full"])
     X = {key: np.asarray([[r["full"][name] for name in names] for r in found]) for key, found in by_topology.items()}
@@ -411,6 +426,10 @@ def fit(rows: list[dict], variants: list[Variant], job: dict, agentic: bool = Tr
 # =============================================================================
 
 
+def _cache(run_dir: Path, target: str) -> Path:
+    return run_dir / "analysis" / ("classifier.json" if target == "category" else f"classifier-{target}.json")
+
+
 def _key(run_dir: Path, records: list[dict]) -> str:
     """Changes when a capture or its result does."""
     parts = []
@@ -423,56 +442,94 @@ def _key(run_dir: Path, records: list[dict]) -> str:
     return hashlib.sha1(f"{VERSION}|{'|'.join(parts)}".encode()).hexdigest()
 
 
-def _work(run_id: str, run_dir: Path, records: list[dict], variants: list[Variant], link: Link | None, key: str, job: dict) -> None:
+def _records(run, link: Link | None) -> list[dict]:
+    aggregate = (marble_analysis.run_aggregate(run.id, run.run_dir, run.variants, link) if link
+                 else analysis.run_aggregate(run.id, run.run_dir, run.variants))
+    return aggregate["records"]
+
+
+def _saved(run_dir: Path, target: str) -> dict | None:
+    """The saved result of this version, whatever captures it was trained on."""
     try:
-        # Never beside a capture: the forests would take the CPU its timings depend on. A queued
-        # run is not capturing yet.
-        while any(r.status in engine.RUNNING_STATUSES for r in engine.active_runs()):
-            job.update(status="waiting", step="Waiting for the runs in progress to finish, so that training doesn't change their timings")
-            time.sleep(10)
-        job.update(status="waiting", step="Waiting for another run's classifier to finish")
-        with _turn:
-            job.update(status="computing", step="Starting")
-            result = compute(run_dir, records, variants, link, job)
-    except Exception as e:
-        traceback.print_exc()
-        result = {"status": "failed", "reason": f"{type(e).__name__}: {e}"}
-    result.update(version=VERSION, key=key)
+        cached = json.loads(_cache(run_dir, target).read_text())
+    except (OSError, ValueError):
+        return None
+    return cached if cached.get("version") == VERSION else None
+
+
+def _targets(run) -> list[str]:
+    """What a run's results page can show: the category, and on a user-to-LLM run comparing several variants, the variant."""
+    return ["category"] + (["variant"] if not run.kind.agentic and len(run.variants) > 1 else [])
+
+
+def _work(run, link: Link | None, target: str, job: dict) -> None:
     try:
-        cache = run_dir / "analysis" / "classifier.json"
-        cache.parent.mkdir(exist_ok=True)
-        tmp = cache.with_suffix(".tmp")
-        tmp.write_text(json.dumps(result))
-        tmp.replace(cache)
-    except OSError:
-        pass   # the run was deleted meanwhile
+        key = None
+        try:
+            # Never beside a capture: reading the captures and training would take the CPU its timings
+            # depend on. A queued run is not capturing yet.
+            while any(r.status in engine.RUNNING_STATUSES for r in engine.active_runs()):
+                job.update(status="waiting", step="Waiting for the runs in progress to finish, so that training doesn't change their timings")
+                time.sleep(10)
+            job.update(status="waiting", step="Waiting for another run's classifier to finish")
+            with _turn:
+                job.update(status="computing", step="Starting")
+                records = _records(run, link)
+                key = _key(run.run_dir, records)
+                cached = _saved(run.run_dir, target)
+                if cached and cached.get("key") == key and cached.get("status") != "failed":
+                    return   # up to date already (asked for every target, only one was missing); a failure is retried
+                console(f"[classifier] {run.id}: training the {target} forests")
+                result = compute(run.run_dir, records, list(run.variants), link, job, target)
+        except Exception as e:
+            traceback.print_exc()
+            result = {"status": "failed", "reason": f"{type(e).__name__}: {e}"}
+        result.update(version=VERSION, key=key)
+        try:
+            cache = _cache(run.run_dir, target)
+            cache.parent.mkdir(exist_ok=True)
+            tmp = cache.with_suffix(".tmp")
+            tmp.write_text(json.dumps(result))
+            tmp.replace(cache)
+        except OSError:
+            pass   # the run was deleted meanwhile
     finally:
+        # Only once the result is saved, so a page asking meanwhile never finds neither
         with _lock:
-            _jobs.pop(run_id, None)
+            _jobs.pop((run.id, target), None)
 
 
-def status(run, link: Link | None) -> dict:
+def start(run) -> None:
+    """Trains every target of a finished run in the background, one run at a time: called when a run
+    completes, and from the results page's Calculate for the runs without results."""
+    if run.status in engine.ACTIVE_STATUSES or missing():
+        return
+    for target in _targets(run):
+        with _lock:
+            if (run.id, target) in _jobs:
+                continue
+            job = _jobs[(run.id, target)] = {"status": "waiting", "step": "Starting"}
+        threading.Thread(target=_work, args=(run, run.kind.link, target, job), name=f"classifier-{run.id}-{target}",
+                         daemon=True).start()
+
+
+def status(run, link: Link | None, target: str = "category") -> dict:
     """The run's classifier results, or where they are: {"status": "ready", ...} once computed,
-    otherwise "running" (the run is not over), "unavailable", "too_small", "failed",
-    "waiting" or "computing" with a `step`. `link` None: a user-to-LLM run."""
+    otherwise "running" (the run is not over), "unavailable", "missing" (never calculated, or
+    its captures changed since: start() calculates it), "too_small", "failed", or "waiting" or
+    "computing" with a `step`. `link` None: a user-to-LLM run. `target`: what the forests
+    predict, the "category" or (user-to-LLM runs) the "variant"."""
     if run.status in engine.ACTIVE_STATUSES:
         return {"status": "running", "reason": "The classifier is trained when the run has finished."}
     if problem := missing():
         return {"status": "unavailable", "reason": problem}
-    aggregate = (marble_analysis.run_aggregate(run.id, run.run_dir, run.variants, link) if link
-                 else analysis.run_aggregate(run.id, run.run_dir, run.variants))
-    records = aggregate["records"]
-    key = _key(run.run_dir, records)
-    try:
-        cached = json.loads((run.run_dir / "analysis" / "classifier.json").read_text())
-        if cached.get("version") == VERSION and cached.get("key") == key:
-            return cached
-    except (OSError, ValueError):
-        pass
     with _lock:
-        job = _jobs.get(run.id)
-        if job is None:
-            job = _jobs[run.id] = {"status": "computing", "step": "Starting"}
-            threading.Thread(target=_work, args=(run.id, run.run_dir, records, list(run.variants), link, key, job),
-                             name=f"classifier-{run.id}", daemon=True).start()
+        job = _jobs.get((run.id, target))
+    if job:
         return {"status": job["status"], "step": job["step"]}
+    cached = _saved(run.run_dir, target)
+    if cached and cached.get("key") == _key(run.run_dir, _records(run, link)):
+        return cached
+    return {"status": "missing",
+            "reason": "This run has no classifier results yet." if cached is None
+            else "Its captures changed since the results were calculated."}

@@ -2,7 +2,7 @@
 
 from . import (
     agent_agents, agent_endpoint, agent_infrastructure, agent_plc, custom_experiment, custom_prompts, data_collector, delay,
-    scalability, temperature_change, topology_transfer,
+    good_bad_agents, scalability, temperature_change, topology_transfer,
 )
 from .base import Kind
 
@@ -20,5 +20,6 @@ KINDS: dict[str, Kind] = {
         agent_plc.KIND,
         agent_endpoint.KIND,
         agent_agents.KIND,
+        good_bad_agents.KIND,
     )
 }

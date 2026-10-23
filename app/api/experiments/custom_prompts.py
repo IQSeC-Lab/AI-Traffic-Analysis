@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from storage import DATA_DIR, model_dir_name
 
-from .base import Kind, ModelRef, RunConfig, Variant
+from .base import Kind, ModelRef, ProviderConfig, Variant
 
 MAX_PROMPTS = 200
 MAX_PROMPT_CHARS = 20_000
@@ -114,7 +114,7 @@ CRAFTED_PROMPTS = [
 ]
 
 
-class CustomPromptsConfig(RunConfig):
+class CustomPromptsConfig(ProviderConfig):
     model: ModelRef
     prompt_texts: list[PromptText] | None = Field(
         None,

@@ -9,10 +9,10 @@ from pydantic import Field
 
 from storage import model_dir_name
 
-from .base import MAX_VARIANTS, Kind, ModelRef, RunConfig, Variant
+from .base import MAX_VARIANTS, Kind, ModelRef, ProviderConfig, Variant
 
 
-class ScalabilityConfig(RunConfig):
+class ScalabilityConfig(ProviderConfig):
     models: list[ModelRef] = Field(
         ...,
         min_length=1,

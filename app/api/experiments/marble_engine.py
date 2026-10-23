@@ -98,8 +98,12 @@ class MarbleExperiment(Experiment):
         """Images the run pulls besides Ollama's; removed after it when they were not here before."""
         return [docker.base_image(DOCKERFILE), NETSHOOT_IMAGE]
 
-    def _task_config(self, task: dict, topology: str) -> str:
-        """The task's MARBLE config (YAML), with the run's model."""
+    def _models(self) -> list[str]:
+        """The Ollama models the agents call: every worker's Ollama loads them all."""
+        return [self.config.model]
+
+    def _task_config(self, k: int, task: dict, topology: str) -> str:
+        """The task's MARBLE config (YAML) for worker k's current capture, with the run's model."""
         source = marble.task_file(task["marble_category"], topology, task["task_id"])
         return source.read_text().replace(marble.CONFIG_MODEL, f"ollama/{self.config.model}")
 
@@ -165,7 +169,8 @@ class MarbleExperiment(Experiment):
             folder.mkdir(parents=True, exist_ok=True)
         if problem := marble.marble_problem():
             raise RuntimeError(problem)
-        ollama_models.reserve_mb(self.config.model, on_gpu=False)   # still downloaded?
+        for model in self._models():
+            ollama_models.reserve_mb(model, on_gpu=False)   # still downloaded?
 
         with engine._lock:
             new = [img for img in self._images() if not docker.exists("image", img)]
@@ -217,7 +222,7 @@ class MarbleExperiment(Experiment):
         if self._is_running(llm) and self._is_running(tls):
             return llm
         worker = self._workers[k]
-        model = self.config.model
+        models = self._models()
         docker.rm_container(tls)
         docker.rm_container(llm)
 
@@ -234,6 +239,8 @@ class MarbleExperiment(Experiment):
             # Plaintext stays on the container's loopback; the proxy is the only way in
             "-e", f"OLLAMA_HOST=127.0.0.1:{OLLAMA_PORT}",
             "-e", "OLLAMA_KEEP_ALIVE=-1",
+            # All of them stay loaded; the default (3 per GPU) would swap one out mid-task
+            "-e", f"OLLAMA_MAX_LOADED_MODELS={len(models)}",
             OLLAMA_IMAGE,
             ctx="start Ollama",
         )
@@ -247,13 +254,14 @@ class MarbleExperiment(Experiment):
             time.sleep(1)
         self.log(f"[ollama] ✓ Container started: {llm}")
 
-        self._set_step("Loading the model")
-        p = docker.run("exec", llm, "ollama", "run", model, "", timeout=LOAD_TIMEOUT)
-        if self._cancel.is_set():
-            return llm
-        if p.returncode != 0:
-            raise FatalRunError(f"Ollama could not load {model}: {(p.stderr or p.stdout).strip()[-500:]}")
-        self.log(f"[ollama] ✓ Model loaded: {model}")
+        self._set_step("Loading the model" + ("s" if len(models) > 1 else ""))
+        for model in models:
+            p = docker.run("exec", llm, "ollama", "run", model, "", timeout=LOAD_TIMEOUT)
+            if self._cancel.is_set():
+                return llm
+            if p.returncode != 0:
+                raise FatalRunError(f"Ollama could not load {model}: {(p.stderr or p.stdout).strip()[-500:]}")
+            self.log(f"[ollama] ✓ Model loaded: {model}")
 
         docker.must(
             "run", "-d", "--name", tls, "--label", self.label,
@@ -276,7 +284,7 @@ class MarbleExperiment(Experiment):
             "run", "--rm", "--name", f"mallm-{self.id}-w{k + 1}-check", "--label", self.label,
             "--network", worker["network"],
             "-e", f"MARBLE_OLLAMA_PROXY_URL=https://{llm}:{PROXY_PORT}",
-            "-e", f"MODEL=ollama/{model}",
+            "-e", f"MODEL=ollama/{models[0]}",
             self.image, "python", "-c", MODEL_CHECK,
             timeout=CHECK_TIMEOUT,
         )
@@ -298,14 +306,18 @@ class MarbleExperiment(Experiment):
         """With a launcher: ask the model for one tool call the way an agent would. A model that
         answers some other way would leave every task's capture empty, so the run stops here
         with what it answered."""
-        if self.LAUNCHER is None or self._cancel.is_set():
-            return
+        for model in self._models():
+            if self.LAUNCHER is None or self._cancel.is_set():
+                return
+            self._check_model_tools(k, llm, model)
+
+    def _check_model_tools(self, k: int, llm: str, model: str) -> None:
         self._set_step("Checking that the model calls its tools")
         p = docker.run(
             "run", "--rm", "--name", f"mallm-{self.id}-w{k + 1}-check", "--label", self.label,
             "--network", self._workers[k]["network"],
             "-e", f"MARBLE_OLLAMA_PROXY_URL=https://{llm}:{PROXY_PORT}",
-            "-e", f"MODEL=ollama/{self.config.model}",
+            "-e", f"MODEL=ollama/{model}",
             *self._launcher_args(),
             self.image, "python", f"/{self.LAUNCHER.name}", "--check-model",
             timeout=CHECK_TIMEOUT,
@@ -319,12 +331,12 @@ class MarbleExperiment(Experiment):
         how, _, rest = answer.partition(" ")
         if how == "TOOL_ERROR":
             raise FatalRunError(
-                f"{self.config.model} did not call a tool when asked to, so its tasks would capture nothing. It answered: {rest}\n"
+                f"{model} did not call a tool when asked to, so its tasks would capture nothing. It answered: {rest}\n"
                 "Try a larger model, or one that the Ollama library lists with tools."
             )
         note = {"TOOL_OK": "", "TOOL_RECOVERED": " (in its own shape, which is read as a call)",
                 "TOOL_ASKED_AGAIN": " (when asked a second time)"}.get(how, "")
-        self.log(f"[ollama] ✓ The model calls its tools{note}: {rest[:160]}")
+        self.log(f"[ollama] ✓ {model} calls its tools{note}: {rest[:160]}")
 
     # ── Per-task capture ─────────────────────────────────────────────────────
 
@@ -379,11 +391,11 @@ class MarbleExperiment(Experiment):
         worker = self._workers[k]
         current = worker["current"]
         task = self.prompts[current["prompt"]]
-        topology = variant.key
+        topology = variant.columns.get("topology", variant.key)   # a variant that is not a topology names its own
         cname = f"mallm-{self.id}-w{k + 1}-agents"
 
         config = self.configs_dir / f"{stem}.yaml"
-        config.write_text(self._task_config(task, topology))
+        config.write_text(self._task_config(k, task, topology))
         # MARBLE appends one line per LLM call here: which agent made it, when it started and ended
         calls_file = self.results_dir / f"{stem}.calls.jsonl"
         calls_file.unlink(missing_ok=True)

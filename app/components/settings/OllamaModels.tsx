@@ -9,7 +9,7 @@ import { useInterval } from "@/lib/useInterval";
 import { Alert, Card, Field, ProgressBar, Spinner, StatusPill, buttonClass, inputClass } from "@/components/ui";
 import { useConfirm } from "@/components/ConfirmDialog";
 
-/** Models pulled from the Ollama library, for the agentic experiments and the Data Collector on Ollama. */
+/** Models pulled from the Ollama library, for the agentic experiments and the SI Traffic Analysis ones on Ollama. */
 export function OllamaModels() {
   const [data, setData] = useState<OllamaModelsResponse | null>(null);
   const [model, setModel] = useState("");
@@ -65,7 +65,7 @@ export function OllamaModels() {
     <Card
       id="ollama-models"
       title="Ollama models"
-      description="Download models from the Ollama library. The agentic experiments use them, and the Data Collector can."
+      description="Download models from the Ollama library. The agentic experiments use them, and the SI Traffic Analysis experiments can."
     >
       <div className="space-y-6">
         <form onSubmit={download} className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">

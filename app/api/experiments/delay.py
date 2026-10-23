@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from storage import model_dir_name
 
-from .base import MAX_VARIANTS, Kind, ModelRef, RunConfig, Variant
+from .base import MAX_VARIANTS, Kind, ModelRef, ProviderConfig, Variant
 
 MAX_MS = 10_000
 
@@ -27,7 +27,7 @@ class NetworkCondition(BaseModel):
     )
 
 
-class DelayConfig(RunConfig):
+class DelayConfig(ProviderConfig):
     model: ModelRef
     conditions: list[NetworkCondition] = Field(
         default_factory=lambda: [NetworkCondition(), NetworkCondition(delay_ms=500, jitter_ms=50)],

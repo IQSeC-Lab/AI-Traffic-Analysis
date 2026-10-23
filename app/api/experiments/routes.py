@@ -8,13 +8,15 @@ Experiment add their saved prompts (custom_prompts.router, custom_experiment.rou
 # No `from __future__ import annotations` here: make_router's endpoints annotate their
 # body with the experiment's config class, which FastAPI must see as a class, not a string.
 
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Query, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from . import (
     agent_agents, agent_endpoint, agent_infrastructure, agent_plc, analysis, custom_experiment, custom_prompts, engine, export,
-    marble_analysis, marble_classifier, topology_transfer,
+    good_bad_agents, marble_analysis, marble_classifier, topology_transfer,
 )
 from .base import NAME_MAX, Kind
 from .kinds import KINDS
@@ -141,11 +143,30 @@ def make_router(kind: Kind) -> APIRouter:
         return found
 
     @router.get("/runs/{run_id}/classifier")
-    def run_classifier(run_id: str) -> dict:
-        """Whether the task (agentic runs) or prompt category can be told from the run's traffic
-        (marble_classifier.py). Trained in the background once the run has finished: `status` says
+    def run_classifier(
+        run_id: str,
+        target: Literal["category", "variant"] = Query(
+            "category", description='"category": the task\'s or prompt\'s category; "variant": which variant (model, '
+                                    "temperature, network condition, scenario) made the capture. User-to-LLM runs only."),
+    ) -> dict:
+        """Whether the task (agentic runs) or prompt category, or the variant, can be told from the run's
+        traffic (marble_classifier.py). Trained in the background once the run has finished: `status` says
         where it is, "ready" with the results."""
-        return marble_classifier.status(_get_run(run_id), kind.link)
+        if kind.agentic and target != "category":
+            raise HTTPException(400, "Agentic runs are classified by task category only.")
+        return marble_classifier.status(_get_run(run_id), kind.link, target)
+
+    @router.post("/runs/{run_id}/classifier", status_code=202)
+    def calculate_classifier(run_id: str) -> dict:
+        """Train the run's forests, every target, in the background: for runs without results (saved before
+        the classifier existed, or whose captures changed). Runs that complete are trained on their own."""
+        run = _get_run(run_id)
+        if run.status in engine.ACTIVE_STATUSES:
+            raise HTTPException(409, "The classifier is trained when the run has finished.")
+        if problem := marble_classifier.missing():
+            raise HTTPException(503, problem)
+        marble_classifier.start(run)
+        return {"status": "started"}
 
     @router.get("/runs/{run_id}/captures")
     def list_captures(run_id: str) -> list[dict]:
@@ -216,4 +237,4 @@ def all_active_runs() -> list[dict]:
 
 routers = [all_router, *(make_router(kind) for kind in KINDS.values()),
            custom_prompts.router, custom_experiment.router, topology_transfer.router, agent_infrastructure.router, agent_endpoint.router,
-           agent_plc.router, agent_agents.router]
+           agent_plc.router, agent_agents.router, good_bad_agents.router]

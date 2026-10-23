@@ -63,7 +63,7 @@ class InfrastructureExperiment(MarbleExperiment):
     def _db(self, k: int) -> str:
         return f"mallm-{self.id}-w{k + 1}-db"
 
-    def _task_config(self, task: dict, topology: str) -> str:
+    def _task_config(self, k: int, task: dict, topology: str) -> str:
         return infra.task_config(task, topology, self.config.model)
 
     def _capture_container(self, k: int, llm: str, stem: str) -> str:

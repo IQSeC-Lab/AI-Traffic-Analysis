@@ -52,7 +52,7 @@ class EndpointExperiment(MarbleExperiment):
     def _user_agent(self) -> str:
         return os.environ.get("MALLM_ENDPOINT_USER_AGENT") or USER_AGENT
 
-    def _task_config(self, task: dict, topology: str) -> str:
+    def _task_config(self, k: int, task: dict, topology: str) -> str:
         return endpoint.task_config(task, topology, self.config.model)
 
     def _capture_container(self, k: int, llm: str, stem: str) -> str:

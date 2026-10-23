@@ -99,11 +99,13 @@ export function RunPage({ experiment, id, initialTab }: { experiment: string; id
   const unit = agentic ? "task" : "prompt";
   const compares = comparesText(run);
   const temperature = runTemperature(run);
+  // Runs that use Ollama mark every variant with its provider: a Custom Experiment can mix the two
+  const onOllama = run.variants.filter((v) => v.columns.provider === "ollama").length;
   const meta = [
     ...(compares ? [compares] : []),
     hardwareLabel(run),
     ...(temperature != null ? [`temperature ${temperature}`] : []),
-    ...(run.config.provider === "ollama" ? ["Ollama"] : []),
+    ...(onOllama ? [onOllama < run.variants.length ? "Hugging Face + Ollama" : "Ollama"] : []),
     `${prompts} ${unit}${prompts === 1 ? "" : "s"}`,
     ...(run.config.repeat ? [`× ${run.config.repeat}`] : []),
     ...((run.config.workers ?? 1) > 1 ? [`${run.config.workers} workers`] : []),

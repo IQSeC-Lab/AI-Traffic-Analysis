@@ -5,7 +5,7 @@ import { AGENTIC_EXPERIMENTS, CLIENT_EXPERIMENTS, MAX_VARIANTS, experimentHref }
 import type { TaskGroup } from "@/lib/plcTasks";
 import { Card, PageHeader } from "@/components/ui";
 
-export const metadata: Metadata = { title: "Information" };
+export const metadata: Metadata = { title: "Getting started" };
 
 const BASICS: [string, string][] = [
   ["Capture", "One PCAP file: one prompt and its streamed response, or one task worked on by several agents."],
@@ -14,6 +14,7 @@ const BASICS: [string, string][] = [
 ];
 
 const CLIENT_SHARED: [string, string][] = [
+  ["Provider", "Hugging Face loads the models on the app's own server with transformers, as in the original experiments. Ollama serves Ollama models instead, with the same prompts, network and capture. The Custom Experiment sets it per scenario, with the model, so one run can compare the two."],
   ["Prompts", "Picked from the library by category or one by one: 60 built in (summarization, code generation, math, malware and adversarial, logic puzzles, technical explanation) plus your own from the Prompts page."],
   ["Repeat each prompt", "Every repetition gets a fresh container and its own PCAP."],
   ["Max tokens", "The most tokens the model generates for one prompt. 2048 by default."],
@@ -34,8 +35,8 @@ const AGENTIC_SHARED: [string, string][] = [
 ];
 
 const GROUPS = [
-  ["Client to Server", "One prompt and its streamed response: the five RogueAgent experiments, and one you set up yourself.", CLIENT_EXPERIMENTS, CLIENT_SHARED],
-  ["Agentic AI", "Several agents working on a task: one experiment per kind of communication captured, each with the coordination topology as an option.", AGENTIC_EXPERIMENTS, AGENTIC_SHARED],
+  ["SI Traffic Analysis", "One prompt and its streamed response: the five RogueAgent experiments, and one you set up yourself.", CLIENT_EXPERIMENTS, CLIENT_SHARED],
+  ["Agentic SI Analysis", "Several agents working on a task: one experiment per kind of communication captured, each with the coordination topology as an option.", AGENTIC_EXPERIMENTS, AGENTIC_SHARED],
 ] as const;
 
 function Terms({ items, className = "" }: { items: readonly (readonly [string, string])[]; className?: string }) {
@@ -89,7 +90,7 @@ function Tasks({ groups }: { groups: readonly TaskGroup[] }) {
 export default function InformationPage() {
   return (
     <>
-      <PageHeader title="Information" description="What each experiment captures, and what every option of its New run form does." />
+      <PageHeader title="Getting started" description="What each experiment captures, and what every option of its New run form does." />
       <div className="space-y-8">
         <Card title="How a run works">
           <Terms items={BASICS} />

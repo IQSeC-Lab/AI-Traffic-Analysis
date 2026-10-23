@@ -39,13 +39,14 @@ from datetime import datetime
 from pathlib import Path
 
 from console import console
+from settings import ollama_models
 from settings import store as settings_store
-from storage import DATA_DIR, MODELS_DIR, estimate_gpu_memory_mb, has_weights, model_dir_name
+from storage import DATA_DIR, MODEL_REF_PATTERN, MODELS_DIR, estimate_gpu_memory_mb, has_weights, model_dir_name
 from system import detect_gpus
 
 from . import docker_cli as docker
 from . import scheduler
-from .base import PROMPTS_FILE, Kind, RunConfig, Variant, library_prompts
+from .base import PROMPTS_FILE, Kind, ProviderConfig, RunConfig, Variant, library_prompts
 from .delay import netem_args
 from .kinds import KINDS
 
@@ -382,6 +383,13 @@ class Experiment:
             self.log(f"✓ Experiment {self.status} ({self.completed}/{self.total})")
             self.log("=" * 60)
             _wake.set()   # its GPU is free: start whatever was waiting for it
+            if self.status == "completed":
+                # Its classifier results, so its results page opens on them. Imported here: it imports this module.
+                try:
+                    from . import marble_classifier
+                    marble_classifier.start(self)
+                except Exception as e:
+                    self.log(f"[classifier] could not start: {e}")
 
     def _work(self, k: int) -> None:
         """Run worker k's share of the captures."""
@@ -446,13 +454,7 @@ class Experiment:
             new = [img for img in (docker.base_image(DOCKERFILE), NETSHOOT_IMAGE) if not docker.exists("image", img)]
             _set_pulled_images(_pulled_images() + new)
 
-        self._set_step("Building Docker image")
-        self.log(f"[setup] Building {self.image} Docker image...")
-        docker.must(
-            "build", "-t", self.image, "--label", self.label,
-            "-f", str(DOCKERFILE), str(TOOLBOX_DIR),
-            ctx="docker build llm-toolbox",
-        )
+        self._build_image()
         self._set_step("Pulling tcpdump image")
         docker.run("pull", NETSHOOT_IMAGE)
         self.log("[setup] ✓ Images ready.")
@@ -465,6 +467,16 @@ class Experiment:
                 ctx=f"create network {w['network']}",
             )
             self.log(f"[setup] ✓ Created isolated network: {w['network']}")
+
+    def _build_image(self) -> None:
+        """The image of the app's own inference server and its client."""
+        self._set_step("Building Docker image")
+        self.log(f"[setup] Building {self.image} Docker image...")
+        docker.must(
+            "build", "-t", self.image, "--label", self.label,
+            "-f", str(DOCKERFILE), str(TOOLBOX_DIR),
+            ctx="docker build llm-toolbox",
+        )
 
     # ── Per-prompt experiment ────────────────────────────────────────────────
 
@@ -753,6 +765,8 @@ def downloaded_models_mb(config: RunConfig, variants: list[Variant]) -> int:
     """GPU memory a worker needs for the run's HuggingFace models, which must all be downloaded."""
     need_mb = 0
     for model in dict.fromkeys(v.model for v in variants):
+        if not re.fullmatch(MODEL_REF_PATTERN, model):
+            raise ValueError(f"Not a HuggingFace model: {model}. Ollama models need the Ollama provider.")
         model_dir = MODELS_DIR / model_dir_name(model)
         if model_dir.resolve().parent != MODELS_DIR:
             raise ValueError(f"Invalid model: {model}")
@@ -766,13 +780,32 @@ def downloaded_models_mb(config: RunConfig, variants: list[Variant]) -> int:
     return need_mb
 
 
+def ollama_models_mb(config: RunConfig, variants: list[Variant]) -> int:
+    """GPU memory a worker needs for the run's Ollama models, which must all be downloaded."""
+    models = list(dict.fromkeys(v.model for v in variants))
+    for model in models:
+        if not re.fullmatch(ollama_models.MODEL_PATTERN, model):
+            raise ValueError(f"Not an Ollama model: {model}. HuggingFace models need the transformers provider.")
+    # Workers run the models one after the other, so they reserve room for the largest
+    return max((ollama_models.reserve_mb(m, on_gpu=config.gpus != []) for m in models), default=0)
+
+
 def submit(kind: Kind, config: RunConfig) -> Experiment:
     """Queue a run. It starts right away when its hardware is free, otherwise when it frees up."""
     prompts = (kind.prompts or library_prompts)(config)
     variants = kind.variants(config)
     if kind.sampled:
         variants = with_default_temperature(variants)
-    need_mb = kind.check(config, variants) if kind.check else downloaded_models_mb(config, variants)
+    if isinstance(config, ProviderConfig):   # a variant's own provider (a Custom Experiment scenario's), or the run's
+        variants = [v if v.provider else replace(v, provider=config.provider) for v in variants]
+    on_ollama = [v for v in variants if v.provider == "ollama"]
+    if on_ollama:   # a column of the metrics CSV, like the temperature
+        variants = [replace(v, columns={**v.columns, "provider": v.provider}) for v in variants]
+    # Workers run the models one after the other, so they reserve room for the largest of either provider
+    need_mb = kind.check(config, variants) if kind.check else max(
+        downloaded_models_mb(config, [v for v in variants if v.provider != "ollama"]),
+        ollama_models_mb(config, on_ollama),
+    )
 
     if isinstance(config.gpus, list):
         config.gpus = sorted(set(config.gpus))
@@ -787,7 +820,13 @@ def submit(kind: Kind, config: RunConfig) -> Experiment:
     scheduler.check_possible(config.gpus, need_mb, config.workers, gpus, config.split_model)
 
     with _lock:
-        runner = (kind.runner(config) if kind.runner else None) or Experiment
+        if kind.runner:
+            runner = kind.runner(config) or Experiment
+        elif on_ollama:
+            from .ollama_engine import OllamaExperiment   # it imports this module
+            runner = OllamaExperiment
+        else:
+            runner = Experiment
         run = runner(kind, config, variants, prompts, need_mb, _next_number())
         _runs[run.id] = run
         run._save()
