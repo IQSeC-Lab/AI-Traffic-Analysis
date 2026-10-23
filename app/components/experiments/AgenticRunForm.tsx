@@ -11,7 +11,7 @@ import { Alert, ButtonLink, Field, Loading, Segmented, Spinner, buttonClass, inp
 import { Section } from "./FormSection";
 import { variantColor } from "./RunBadge";
 import { SelectCard } from "./RunForm";
-import { TasksEditor, sameTasks } from "./TasksEditor";
+import { TasksEditor } from "./TasksEditor";
 
 const gb = (mb: number) => `${(mb / 1024).toFixed(1)} GB`;
 
@@ -334,7 +334,7 @@ export function AgenticRunForm({ experiment }: { experiment: string }) {
               return off ? (
                 <div key={c.slug} className="rounded-xl border border-hairline p-3">
                   <div className="text-sm font-medium text-ink-3">{c.label}</div>
-                  <div className="mt-0.5 text-xs text-ink-3">{c.disabled ?? (c.texts ? "No tasks. Add some under Edit tasks." : "No task configs found.")}</div>
+                  <div className="mt-0.5 text-xs text-ink-3">{c.disabled ?? (catalog.editable ? "No tasks. Add some under Edit tasks." : "No task configs found.")}</div>
                 </div>
               ) : (
                 <SelectCard key={c.slug} role="checkbox" selected={on} onClick={() => setCategories((cur) => toggle(cur, c.slug))}>
@@ -342,7 +342,7 @@ export function AgenticRunForm({ experiment }: { experiment: string }) {
                   <div className="mt-0.5 text-xs text-ink-3 tabular-nums">
                     {c.about ? `${c.about} · ` : ""}
                     {c.tasks.length} task{c.tasks.length === 1 ? "" : "s"}
-                    {c.texts && c.builtin && !sameTasks(c.texts, c.builtin) && " · edited"}
+                    {c.edited && " · edited"}
                   </div>
                 </SelectCard>
               );

@@ -101,3 +101,6 @@ def tasks() -> dict:
     for category in found["categories"]:
         category["disabled"] = category["disabled"] or SHARED_STATE.get(category["slug"])
     return found
+
+
+marble.task_editing(router)

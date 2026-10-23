@@ -258,6 +258,17 @@ export function ClassifierTiles({
     };
   });
 
+  // Of the captures sent in each category, the share guessed right, pooled over the forests of every topology or variant
+  const perCategory = result.categories.map((name, i) => {
+    const row = result.categories.map((_, j) => result.confusion.reduce((sum, c) => sum + c.counts[i][j], 0));
+    const total = row.reduce((a, b) => a + b, 0);
+    const mistaken = row.reduce((best, v, j) => (j !== i && (best === i || v > row[best]) ? j : best), i);
+    // null: never mistaken for another one
+    const confused = mistaken !== i && row[mistaken] > 0 ? result.categories[mistaken] : null;
+    return { name, total, recognized: total ? row[i] / total : null, mistaken: confused, share: total ? row[mistaken] / total : 0 };
+  });
+  const thing = byVariant ? what : "category";
+
   const agentCounts = [...new Set(result.visibility.flatMap((v) => v.counts.map((c) => c.agents)))].sort((a, b) => a - b);
   const visibilitySeries = result.visibility.map((v) => ({
     id: v.key,
@@ -306,6 +317,38 @@ export function ClassifierTiles({
         />
       </ChartCard>
 
+      <ChartCard
+        title={`Recognized per ${thing}`}
+        subtitle={`Of the captures of each ${thing}, the share the forests guessed right, on ${unit}s they had not seen: every capture is guessed once over the folds${
+          result.confusion.length > 1 ? `, by the forest of its own ${variable?.one ?? "topology"}` : ""
+        }. Hover a bar for what it was most often mistaken for.`}
+        height={Math.max(160, perCategory.length * 34)}
+        className={single ? "col-span-7" : "col-span-12"}
+        table={{
+          columns: [capital(thing), "Captures", "Recognized", "Most mistaken for", "Share"],
+          rows: perCategory.map((c) => [
+            c.name,
+            c.total,
+            c.recognized == null ? "–" : percent1(c.recognized),
+            c.mistaken ?? "Never",
+            c.mistaken ? percent1(c.share) : "–",
+          ]),
+        }}
+      >
+        <BarList
+          rows={perCategory.map((c) => ({
+            id: c.name,
+            label: c.name,
+            color: "var(--accent)",
+            value: c.recognized,
+            note: c.mistaken ? `most often mistaken for ${c.mistaken} (${percent(c.share)})` : `never mistaken for another ${thing}`,
+          }))}
+          format={percent}
+          height={Math.max(160, perCategory.length * 34)}
+          ariaLabel={`Share of each ${thing}'s captures guessed right`}
+        />
+      </ChartCard>
+
       {agentic && <ChartCard
         title="Agent visibility"
         subtitle={`The same accuracy when only some agents' packets are seen: that many agents picked at random in each task (${result.orderings} draws), trained and tested on that view.`}
@@ -338,7 +381,7 @@ export function ClassifierTiles({
         title="What the classifier relies on"
         subtitle={`The ten measurements, of ${result.features}, that the forests lean on most${variable && !byVariant ? ` under each ${variable.one}` : ""}: their share of the forests' decisions (mean decrease in impurity), averaged over the folds.${agentic || byVariant ? "" : " Outgoing packets are the request, so their sizes follow the prompt's length."}`}
         height={300}
-        className={single ? "col-span-7" : "col-span-12"}
+        className="col-span-12"
         table={{
           columns: [byVariant ? "Trained on" : variable ? capital(variable.one) : "Model", "Rank", "Measurement", "Importance", "Lowest fold", "Highest fold"],
           rows: result.importance.flatMap((t) => t.features.map((f, i) => [forestLabel(t.label), i + 1, f.name, percent1(f.mean), percent1(f.min), percent1(f.max)])),

@@ -79,17 +79,22 @@ export type TaskCatalog = {
     disabled: string | null;
     about: string | null;
     tasks: number[];
-    texts?: AgentTask[]; // editable tasks (Agent to Infrastructure, PLC, Endpoint): as they are now
-    builtin?: AgentTask[]; // and as they ship
+    edited?: boolean; // its tasks were edited in the New run form (GET /api/<slug>/tasks/<category>)
   }[];
-  editable?: { max_tasks: number; max_chars: number }; // present when the tasks can be edited
+  // Present when the tasks can be edited. `shared`: which other experiments an edit also changes
+  editable?: { max_tasks: number; max_chars: number; shared?: string };
   states?: string[]; // Agent to PLC: the states of the brewery a task can start from
   /** Good Agent Bad Agent: the team settings' defaults and limits */
   team?: { good: number; bad: number; max: number; max_models: number; good_prompt: string; bad_prompt: string; prompt_max: number };
 };
 
 /** A task of an agentic experiment with tasks of its own. */
-export type AgentTask = { text: string; state?: string | null };
+export type AgentTask = {
+  text: string;
+  state?: string | null; // Agent to PLC: the state of the brewery it starts from
+  base?: number; // MARBLE: the task file its agents and setup come from
+  agents?: { id: string; profile: string }[]; // MARBLE: those agents, profiles as edited
+};
 
 export type TokenStatus = {
   set: boolean;
@@ -397,6 +402,9 @@ export type ClassifierResult =
       importance: { key: string; label: string; features: { name: string; mean: number; min: number; max: number }[] }[];
       // `visible` is how many agents are seen on average: a task with fewer agents than asked shows them all
       visibility: { key: string; label: string; captures: number; counts: (Spread & { agents: number; visible: number })[] }[];
+      // Per topology or variant, every capture's guess on held-out tasks or prompts: counts[i][j] captures of
+      // categories[i] guessed as categories[j]
+      confusion: { key: string; label: string; counts: number[][] }[];
       seconds: number;
     };
 

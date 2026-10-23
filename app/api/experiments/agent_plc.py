@@ -89,4 +89,4 @@ def tasks() -> dict:
     )
 
 
-common.task_editing(router, KIND.slug, BUILTIN, tasks, states=plant.STATES)
+common.task_editing(router, KIND.slug, BUILTIN, states=plant.STATES)

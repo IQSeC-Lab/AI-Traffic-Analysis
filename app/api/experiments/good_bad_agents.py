@@ -161,3 +161,6 @@ def tasks() -> dict:
     found["team"] = {"good": 2, "bad": 1, "max": MAX_TEAM, "max_models": MAX_VARIANTS - 1,
                      "good_prompt": GOOD_PROMPT, "bad_prompt": BAD_PROMPT, "prompt_max": PROMPT_MAX}
     return found
+
+
+agents.marble.task_editing(router)   # the tasks are Agent to Agents', edited in the same place

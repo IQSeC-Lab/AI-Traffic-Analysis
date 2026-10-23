@@ -104,8 +104,7 @@ class MarbleExperiment(Experiment):
 
     def _task_config(self, k: int, task: dict, topology: str) -> str:
         """The task's MARBLE config (YAML) for worker k's current capture, with the run's model."""
-        source = marble.task_file(task["marble_category"], topology, task["task_id"])
-        return source.read_text().replace(marble.CONFIG_MODEL, f"ollama/{self.config.model}")
+        return marble.task_config(task, topology, self.config.model)
 
     def _capture_container(self, k: int, llm: str, stem: str) -> str:
         """The container whose network interface the task is captured on, started here when it

@@ -46,7 +46,7 @@ from console import console
 from . import analysis, engine, marble_analysis
 from .base import Link, Variant
 
-VERSION = 1
+VERSION = 2   # 2: per-category results ("confusion")
 FOLDS = 5              # as in the dataset's analysis
 MIN_FOLDS = 3          # fewer tasks than this in a category: no classifier
 TREES = 150
@@ -303,8 +303,9 @@ def compute(run_dir: Path, records: list[dict], variants: list[Variant], link: L
     label = "category"
     if target == "variant":
         # The variant is the label; every capture in one forest, still tested on prompts it has not seen
+        names = {v.key: v.label for v in variants}
         for row in rows:
-            row["category"], row["topology"] = row["topology"], "all"
+            row["category"], row["topology"] = names[row["topology"]], "all"
         variants, label = [Variant(key="all", label="All captures", model="")], "compared setting"
     return {**fit(rows, variants, job, agentic=link is not None, label=label), "seconds": round(time.monotonic() - started, 1)}
 
@@ -313,7 +314,7 @@ def fit(rows: list[dict], variants: list[Variant], job: dict, agentic: bool = Tr
     """The forests on rows of _load or _load_prompts: each with its variant ("topology"),
     label ("category"), task or prompt ("group"), features ("full") and, from _load, its agents."""
     import numpy as np
-    from sklearn.metrics import balanced_accuracy_score
+    from sklearn.metrics import balanced_accuracy_score, confusion_matrix
     from sklearn.model_selection import StratifiedGroupKFold
 
     unit, setting = ("task", "topology") if agentic else ("prompt", "setting the run compares")
@@ -354,6 +355,7 @@ def fit(rows: list[dict], variants: list[Variant], job: dict, agentic: bool = Tr
     # held-out tasks of its own topology and on the same tasks under the other ones
     scores: dict[tuple[str, str], list[float]] = {}
     importances: dict[str, list] = {}
+    guesses: dict[str, tuple[list, list]] = {}   # per topology, every capture's held-out guess: (sent, guessed)
     for s, source in enumerate(by_topology):
         for fold, (train, test) in enumerate(splits(y[source], groups[source])):
             model = fit(_forest(100_000 + 25_000 * s + fold), X[source][train], y[source][train])
@@ -362,8 +364,12 @@ def fit(rows: list[dict], variants: list[Variant], job: dict, agentic: bool = Tr
             for target in by_topology:
                 tested = test if target == source else np.flatnonzero(np.isin(groups[target], heldout))
                 if len(tested):
-                    scores.setdefault((source, target), []).append(
-                        balanced_accuracy_score(y[target][tested], model.predict(X[target][tested])))
+                    guessed = model.predict(X[target][tested])
+                    scores.setdefault((source, target), []).append(balanced_accuracy_score(y[target][tested], guessed))
+                    if target == source:   # the folds split the captures, so each is guessed once
+                        sent, found = guesses.setdefault(source, ([], []))
+                        sent.extend(y[target][tested].tolist())
+                        found.extend(guessed.tolist())
 
     transfer = [
         {"train": source, "test": target, "train_label": labels[source], "test_label": labels[target],
@@ -418,6 +424,9 @@ def fit(rows: list[dict], variants: list[Variant], job: dict, agentic: bool = Tr
         "transfer": transfer,
         "importance": importance,
         "visibility": visibility,
+        # Per topology: counts[i][j] captures of categories[i] guessed as categories[j]
+        "confusion": [{"key": key, "label": labels[key], "counts": confusion_matrix(sent, found, labels=categories).tolist()}
+                      for key, (sent, found) in guesses.items()],
     }
 
 
@@ -530,6 +539,10 @@ def status(run, link: Link | None, target: str = "category") -> dict:
     cached = _saved(run.run_dir, target)
     if cached and cached.get("key") == _key(run.run_dir, _records(run, link)):
         return cached
-    return {"status": "missing",
-            "reason": "This run has no classifier results yet." if cached is None
-            else "Its captures changed since the results were calculated."}
+    if cached:
+        reason = "Its captures changed since the results were calculated."
+    elif _cache(run.run_dir, target).exists():
+        reason = "Its results were calculated by an older version of the classifier, without the per-category results."
+    else:
+        reason = "This run has no classifier results yet."
+    return {"status": "missing", "reason": reason}

@@ -165,4 +165,4 @@ def tasks() -> dict:
     )
 
 
-common.task_editing(router, KIND.slug, BUILTIN, tasks)
+common.task_editing(router, KIND.slug, BUILTIN)
