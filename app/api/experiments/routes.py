@@ -13,8 +13,8 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from . import (
-    agent_endpoint, agent_infrastructure, analysis, custom_experiment, custom_prompts, engine, export, marble_analysis,
-    marble_classifier, topology_transfer,
+    agent_agents, agent_endpoint, agent_infrastructure, agent_plc, analysis, custom_experiment, custom_prompts, engine, export,
+    marble_analysis, marble_classifier, topology_transfer,
 )
 from .base import NAME_MAX, Kind
 from .kinds import KINDS
@@ -140,12 +140,12 @@ def make_router(kind: Kind) -> APIRouter:
             }
         return found
 
-    if kind.link:
-        @router.get("/runs/{run_id}/classifier")
-        def run_classifier(run_id: str) -> dict:
-            """Whether the task category can be told from the run's traffic (marble_classifier.py). Trained in
-            the background once the run has finished: `status` says where it is, "ready" with the results."""
-            return marble_classifier.status(_get_run(run_id), kind.link)
+    @router.get("/runs/{run_id}/classifier")
+    def run_classifier(run_id: str) -> dict:
+        """Whether the task (agentic runs) or prompt category can be told from the run's traffic
+        (marble_classifier.py). Trained in the background once the run has finished: `status` says
+        where it is, "ready" with the results."""
+        return marble_classifier.status(_get_run(run_id), kind.link)
 
     @router.get("/runs/{run_id}/captures")
     def list_captures(run_id: str) -> list[dict]:
@@ -215,4 +215,5 @@ def all_active_runs() -> list[dict]:
 
 
 routers = [all_router, *(make_router(kind) for kind in KINDS.values()),
-           custom_prompts.router, custom_experiment.router, topology_transfer.router, agent_infrastructure.router, agent_endpoint.router]
+           custom_prompts.router, custom_experiment.router, topology_transfer.router, agent_infrastructure.router, agent_endpoint.router,
+           agent_plc.router, agent_agents.router]

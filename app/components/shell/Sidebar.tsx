@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { Cpu, LayoutDashboard, Menu, MessagesSquare, Radar, Settings, X } from "lucide-react";
+import { Cpu, Info, LayoutDashboard, Menu, MessagesSquare, Radar, Settings, X } from "lucide-react";
 
 import { api, type Run, type SystemInfo } from "@/lib/api";
 import { AGENTIC_EXPERIMENTS, CLIENT_EXPERIMENTS, experimentHref, runHref } from "@/lib/experiments";
@@ -154,6 +154,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         )}
 
         <nav className="space-y-0.5">
+          <NavItem href="/information" icon={Info} label="Information" active={pathname.startsWith("/information")} />
           <NavItem href="/settings" icon={Settings} label="Settings" active={pathname.startsWith("/settings")} />
         </nav>
 

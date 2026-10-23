@@ -10,6 +10,7 @@ import { useInterval } from "@/lib/useInterval";
 import { Alert, Loading, StatTile, buttonClass } from "@/components/ui";
 import type { Series } from "@/components/charts/scale";
 import { CategoryChart, CompareChart, GapChart, SizeChart } from "./AnalyticsCharts";
+import { ClassifierTiles } from "./AgenticClassifier";
 import { CaptureDrawer } from "./CaptureDrawer";
 import { comparesText, modelName, runTemperature, variantColor, variantLabel } from "./RunBadge";
 
@@ -184,6 +185,8 @@ export function RunResults({ run, live }: { run: Run; live: boolean }) {
           </>
         )}
         {byWorker && <WorkersTile workers={workers} total={captures.length} className="col-span-12" />}
+        {/* Prompts written for the run are each their own category: nothing to tell apart on unseen prompts */}
+        {!byPrompt && <ClassifierTiles run={run} series={series} live={live} />}
       </div>
 
       <div className="overflow-hidden rounded-2xl border border-hairline bg-surface shadow-[0_1px_2px_rgba(0,0,0,0.04)]">

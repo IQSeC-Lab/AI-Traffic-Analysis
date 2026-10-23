@@ -45,18 +45,19 @@ def check(config: TaskRunConfig, variants: list[Variant]) -> int:
     return ollama_models.reserve_mb(config.model, on_gpu=config.gpus != [])
 
 
-def prompts(config: TaskRunConfig, categories: dict[str, str], tasks: dict[str, list[str]], agents: int) -> dict[int, dict]:
+def prompts(config: TaskRunConfig, categories: dict[str, str], tasks: dict[str, list[str]], agents: int,
+            per_category: int = TASKS_PER_CATEGORY) -> dict[int, dict]:
     """The run's tasks as its prompts, numbered in category order: {number: {"text", "category", ...}}.
-    `categories` is {slug: label} and `tasks` the requests of each."""
+    `categories` is {slug: label}, `tasks` the requests of each, `per_category` how many each has."""
     if problem := marble_problem():
         raise ValueError(problem)
     unknown = [c for c in config.categories if c not in categories]
     if unknown:
         raise ValueError(f"Unknown task categor{'y' if len(unknown) == 1 else 'ies'}: {', '.join(unknown)}.")
     numbers = sorted(set(config.tasks))
-    missing = [t for t in numbers if not 1 <= t <= TASKS_PER_CATEGORY]
+    missing = [t for t in numbers if not 1 <= t <= per_category]
     if missing:
-        raise ValueError(f"Every category has tasks 1 to {TASKS_PER_CATEGORY}; there is no task {missing[0]}.")
+        raise ValueError(f"Every category has tasks 1 to {per_category}; there is no task {missing[0]}.")
     found: dict[int, dict] = {}
     for category in [c for c in categories if c in config.categories]:
         for task_id in numbers:
@@ -92,8 +93,9 @@ def task_config(*, scenario: str, task: dict, topology: str, model: str, environ
     }, sort_keys=False, allow_unicode=True, width=120)
 
 
-def catalog(about: str, categories: dict[str, tuple[str, str]], **more) -> dict:
-    """What the New run form needs: `categories` is {slug: (label, what the form says about it)}."""
+def catalog(about: str, categories: dict[str, tuple[str, str]], per_category: int = TASKS_PER_CATEGORY, **more) -> dict:
+    """What the New run form needs: `categories` is {slug: (label, what the form says about it)},
+    with `per_category` tasks each."""
     problem = marble_problem()
     return {
         "available": problem is None,
@@ -101,12 +103,12 @@ def catalog(about: str, categories: dict[str, tuple[str, str]], **more) -> dict:
         "marble_dir": str(MARBLE_DIR),
         "repo": MARBLE_REPO,
         "default_model": DEFAULT_MODEL,
-        "dataset_tasks": TASKS_PER_CATEGORY,
+        "dataset_tasks": per_category,
         "from_dataset": False,
         "about": about,
         "topologies": [{"key": key, "label": label} for key, (label, _, _) in TOPOLOGIES.items()],
         "categories": [
-            {"slug": slug, "label": label, "disabled": None, "about": text, "tasks": list(range(1, TASKS_PER_CATEGORY + 1))}
+            {"slug": slug, "label": label, "disabled": None, "about": text, "tasks": list(range(1, per_category + 1))}
             for slug, (label, text) in categories.items()
         ],
         **more,

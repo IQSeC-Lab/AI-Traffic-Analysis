@@ -80,6 +80,8 @@ except Exception as e:
 
 
 class MarbleExperiment(Experiment):
+    TASK_TIMEOUT = TASK_TIMEOUT   # seconds a task's MARBLE run may take
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.image = f"{IMAGE_REPO}:{self.id}"
@@ -399,7 +401,7 @@ class MarbleExperiment(Experiment):
             *self._launcher_args(),
             *self._agents_args(k, stem),
             self.image, *self._agents_command(f"/configs/{config.name}"),
-            timeout=TASK_TIMEOUT,
+            timeout=self.TASK_TIMEOUT,
         )
         ended = time.time()
         timed_out = p.returncode == 124 and not p.stdout
@@ -409,7 +411,7 @@ class MarbleExperiment(Experiment):
         completed = marble.TOPOLOGIES[topology][2] in output
         error = None
         if timed_out:
-            error = f"Stopped after {TASK_TIMEOUT} s without finishing."
+            error = f"Stopped after {self.TASK_TIMEOUT} s without finishing."
         elif not completed:
             # MARBLE retries a failed model call and prints why each time; the traceback that
             # ends its output only says that the call returned nothing.

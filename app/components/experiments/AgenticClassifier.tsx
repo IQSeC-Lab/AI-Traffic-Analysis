@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { api, type AgenticCapture, type AgenticMetrics, type ClassifierResult, type Run } from "@/lib/api";
+import { EXPERIMENTS } from "@/lib/experiments";
 import { formatBytes, formatMs, formatNumber, formatPercent } from "@/lib/format";
 import { useInterval } from "@/lib/useInterval";
 import { Spinner } from "@/components/ui";
@@ -15,6 +16,7 @@ import type { Series } from "@/components/charts/scale";
 const count = (v: number) => formatNumber(v, 0);
 const percent = (v: number) => formatPercent(v, 0);
 const percent1 = (v: number) => formatPercent(v, 1);
+const capital = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
 // 1, 10 and 100 of each unit up to 100 GB: a tenfold step apart (nearly, between units) and round in the unit they are shown in
 const BYTE_TICKS = [0, 1, 2, 3].flatMap((unit) => [1, 10, 100].map((n) => n * 1024 ** unit));
@@ -120,7 +122,7 @@ export function DistributionTile({
 const STATE_TITLE: Record<Exclude<ClassifierResult["status"], "ready">, string> = {
   running: "Trained when the run has finished",
   unavailable: "Not installed on the server",
-  too_small: "Not enough tasks",
+  too_small: "Not enough to train on",
   failed: "The classifier could not be trained",
   waiting: "Waiting for other runs",
   computing: "Training",
@@ -129,8 +131,14 @@ const STATE_TITLE: Record<Exclude<ClassifierResult["status"], "ready">, string> 
 /**
  * The classifier side of the dataset's analysis, on this run: whether the task category can be told from the
  * encrypted traffic, within a topology and across them, with only some agents visible, and from which measurements.
+ * On a user-to-LLM run the same forests predict the prompt's category, with the run's variants in the topologies' place.
  */
 export function ClassifierTiles({ run, series, live }: { run: Run; series: Series[]; live: boolean }) {
+  const experiment = EXPERIMENTS.find((e) => e.slug === run.experiment);
+  const agentic = Boolean(experiment?.agentic);
+  const unit = agentic ? "task" : "prompt";
+  const variable = experiment?.variable; // what the run compares; none in the Data Collector
+  const title = agentic ? "Task fingerprinting" : "Prompt fingerprinting";
   const [result, setResult] = useState<ClassifierResult | null>(null);
   const url = `/${run.experiment}/runs/${run.id}/classifier`;
   const refresh = useCallback(() => {
@@ -146,9 +154,11 @@ export function ClassifierTiles({ run, series, live }: { run: Run; series: Serie
   if (result.status !== "ready") {
     return (
       <div className="col-span-12 rounded-2xl border border-hairline bg-surface p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
-        <div className="text-sm font-semibold">Task fingerprinting</div>
+        <div className="text-sm font-semibold">{title}</div>
         <div className="mt-0.5 text-xs text-ink-3">
-          Whether a classifier can tell the task category from the encrypted traffic alone, on tasks it has not seen.
+          {agentic
+            ? "Whether a classifier can tell the task category from the encrypted traffic alone, on tasks it has not seen."
+            : "Whether a classifier can tell a prompt's category from the sizes and timing of its packets alone, on prompts it has not seen."}
         </div>
         <div className="mt-4 flex items-center gap-2 text-sm font-medium">
           {pending && <Spinner />}
@@ -161,11 +171,14 @@ export function ClassifierTiles({ run, series, live }: { run: Run; series: Serie
 
   const colorOf = (key: string) => series.find((s) => s.id === key)?.color ?? "var(--accent)";
   const chance = { value: result.chance, label: `chance ${percent(result.chance)}` };
-  const setup = `${result.folds} folds split by task`;
+  const setup = `${result.folds} folds split by ${unit}`;
 
   // Trained on each topology: tested on its own held-out tasks, and on the same tasks under the other topologies
   const trained = [...new Set(result.transfer.map((t) => t.train))];
-  const conditions = result.transfer.some((t) => !t.within) ? ["Same topology", "Another topology"] : ["Same topology"];
+  const same = variable ? `Same ${variable.one}` : `Held-out ${unit}s`;
+  const conditions = result.transfer.some((t) => !t.within) ? [same, `Another ${variable?.one}`] : [same];
+  // Agentic runs put agent visibility beside it; a user-to-LLM run with one variant, the importances
+  const single = !agentic && result.importance.length === 1;
   const transferSeries = trained.map((key) => {
     const mine = result.transfer.filter((t) => t.train === key);
     const cells = conditions.map((_, i) => mine.filter((t) => t.within === (i === 0)));
@@ -191,24 +204,32 @@ export function ClassifierTiles({ run, series, live }: { run: Run; series: Serie
   return (
     <>
       <ChartCard
-        title="Task fingerprinting"
-        subtitle={`Balanced accuracy of a Random Forest predicting the task category from ${result.features} measurements of a capture's packets, tested on tasks it has not seen (${setup}). Whiskers: one standard deviation over the folds.`}
+        title={title}
+        subtitle={`Balanced accuracy of a Random Forest predicting the ${unit} category from ${result.features} measurements of a capture's packets, tested on ${unit}s it has not seen (${setup}). Whiskers: one standard deviation over the folds.`}
         legend={transferSeries}
         legendShape="rect"
         height={240}
-        className="col-span-5"
+        className={agentic || single ? "col-span-5" : "col-span-12"}
         table={{
           columns: ["Trained on", "Tested on", "Accuracy", "Std. deviation", "Per fold"],
           rows: result.transfer.map((t) => [t.train_label, t.test_label, percent1(t.mean), percent1(t.std), t.values.map(percent).join(", ")]),
         }}
-        footer={`${result.tasks} tasks in ${result.categories.length} categories, ${Object.entries(result.captures)
+        footer={`${result.tasks} ${unit}s in ${result.categories.length} categories, ${Object.entries(result.captures)
           .map(([label, n]) => `${n} captures under ${label}`)
           .join(" and ")}. Trained in ${formatNumber(result.seconds)} s.`}
       >
-        <GroupedColumns categories={conditions} series={transferSeries} format={percent} max={1} reference={chance} height={240} ariaLabel="Balanced accuracy within and across topologies" />
+        <GroupedColumns
+          categories={conditions}
+          series={transferSeries}
+          format={percent}
+          max={1}
+          reference={chance}
+          height={240}
+          ariaLabel={variable ? `Balanced accuracy within and across ${variable.many}` : `Balanced accuracy on held-out ${unit}s`}
+        />
       </ChartCard>
 
-      <ChartCard
+      {agentic && <ChartCard
         title="Agent visibility"
         subtitle={`The same accuracy when only some agents' packets are seen: that many agents picked at random in each task (${result.orderings} draws), trained and tested on that view.`}
         legend={visibilitySeries}
@@ -234,19 +255,19 @@ export function ClassifierTiles({ run, series, live }: { run: Run; series: Serie
         ) : (
           <div className="flex h-60 items-center justify-center text-sm text-ink-3">No packets could be attributed to an agent in this run.</div>
         )}
-      </ChartCard>
+      </ChartCard>}
 
       <ChartCard
         title="What the classifier relies on"
-        subtitle={`The ten measurements, of ${result.features}, that the forests lean on most under each topology: their share of the forests' decisions (mean decrease in impurity), averaged over the folds.`}
+        subtitle={`The ten measurements, of ${result.features}, that the forests lean on most${variable ? ` under each ${variable.one}` : ""}: their share of the forests' decisions (mean decrease in impurity), averaged over the folds.${agentic ? "" : " Outgoing packets are the request, so their sizes follow the prompt's length."}`}
         height={300}
-        className="col-span-12"
+        className={single ? "col-span-7" : "col-span-12"}
         table={{
-          columns: ["Topology", "Rank", "Measurement", "Importance", "Lowest fold", "Highest fold"],
+          columns: [variable ? capital(variable.one) : "Model", "Rank", "Measurement", "Importance", "Lowest fold", "Highest fold"],
           rows: result.importance.flatMap((t) => t.features.map((f, i) => [t.label, i + 1, f.name, percent1(f.mean), percent1(f.min), percent1(f.max)])),
         }}
       >
-        <div className={`grid gap-8 ${result.importance.length > 1 ? "grid-cols-2" : ""}`}>
+        <div className="grid gap-8" style={{ gridTemplateColumns: `repeat(${Math.min(result.importance.length, 4)}, minmax(0, 1fr))` }}>
           {result.importance.map((t) => (
             <div key={t.key} className="min-w-0">
               <div className="mb-1 text-xs font-medium text-ink-2">{t.label}</div>
@@ -260,7 +281,7 @@ export function ClassifierTiles({ run, series, live }: { run: Run; series: Serie
                 }))}
                 format={percent1}
                 height={280}
-                ariaLabel={`The ten most important measurements under the ${t.label} topology`}
+                ariaLabel={`The ten most important measurements for ${t.label}`}
               />
             </div>
           ))}

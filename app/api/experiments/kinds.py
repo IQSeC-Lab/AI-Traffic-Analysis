@@ -1,8 +1,8 @@
 """Every capture experiment in the app, by slug."""
 
 from . import (
-    agent_endpoint, agent_infrastructure, custom_experiment, custom_prompts, data_collector, delay, scalability,
-    temperature_change, topology_transfer,
+    agent_agents, agent_endpoint, agent_infrastructure, agent_plc, custom_experiment, custom_prompts, data_collector, delay,
+    scalability, temperature_change, topology_transfer,
 )
 from .base import Kind
 
@@ -17,6 +17,8 @@ KINDS: dict[str, Kind] = {
         custom_experiment.KIND,
         topology_transfer.KIND,
         agent_infrastructure.KIND,
+        agent_plc.KIND,
         agent_endpoint.KIND,
+        agent_agents.KIND,
     )
 }

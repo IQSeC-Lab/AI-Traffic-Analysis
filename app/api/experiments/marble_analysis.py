@@ -8,7 +8,8 @@ Ollama for Agent to LLM, the database for Agent to Infrastructure. So there is n
 response stream, and the measurements are those of marble-traffic-dataset's analysis
 (run_incremental_analysis.py), over the encrypted application packets of every connection:
   - packets to or from the service's port that carry a payload, without retransmissions
-    and without TLS handshake, change-cipher-spec and alert records
+    and without TLS handshake, change-cipher-spec and alert records (for OPC UA, which is
+    not TLS, its Hello, Acknowledge, OpenSecureChannel and CloseSecureChannel messages)
   - a burst is a run of consecutive packets in one direction; idle time is every gap
     between packets longer than a second
 
@@ -140,7 +141,7 @@ def read_packets(path: Path, link: Link) -> tuple[list[tuple[float, int, int]], 
         if key in seen:                      # retransmission
             continue
         seen.add(key)
-        if _is_tls_control(payload) or payload in link.preamble:
+        if _is_tls_control(payload) or payload in link.preamble or payload.startswith(link.setup):
             continue
         kept.append((t, direction, len(payload)))
     if first is not None:

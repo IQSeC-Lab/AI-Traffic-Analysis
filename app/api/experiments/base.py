@@ -98,6 +98,9 @@ class Link:
     port: int                           # the service's port: a capture's traffic is the packets to or from it
     calls: str                          # captures/<stem>.<calls>.json: the calls its packets are attributed to
     preamble: tuple[bytes, ...] = ()    # payloads sent in the clear before TLS starts, left out like its handshake
+    # How a protocol's own connection setup starts, for one that is not TLS (OPC UA's Hello,
+    # OpenSecureChannel, ...): payloads that start so are left out like a TLS handshake
+    setup: tuple[bytes, ...] = ()
 
 
 @dataclass(frozen=True)

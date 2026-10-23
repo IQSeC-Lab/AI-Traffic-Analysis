@@ -1,8 +1,11 @@
 """
-Task fingerprinting on a finished agentic run: can the kind of task the agents worked on be
-told from the encrypted traffic alone? This is the classifier side of the dataset's
-analysis (the plots bundle's marble_top10_rf_feature_importance and
-marble_topology_transfer_agent_visibility), run on the run's own captures.
+Task fingerprinting on a finished run: can the kind of task the agents worked on (or, in
+the user-to-LLM experiments, the category of the prompt) be told from the traffic alone?
+This is the classifier side of the dataset's analysis (the plots bundle's
+marble_top10_rf_feature_importance and marble_topology_transfer_agent_visibility), run on
+the run's own captures. In a user-to-LLM run a prompt plays the task's part and the
+variant (temperature, model, network condition, scenario) the topology's; there are no
+agents, so no visibility test.
 
 Each capture becomes 247 measurements of its packets' timing, direction and size
 (features_from_arrays, ported from marble-traffic-dataset's run_incremental_analysis.py).
@@ -27,13 +30,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import struct
 import threading
 import time
 import traceback
 from importlib.util import find_spec
 from pathlib import Path
 
-from . import engine, marble_analysis
+from . import analysis, engine, marble_analysis
 from .base import Link, Variant
 
 VERSION = 1
@@ -218,6 +222,33 @@ def _load(run_dir: Path, records: list[dict], link: Link, job: dict) -> list[dic
     return rows
 
 
+def _load_prompts(run_dir: Path, records: list[dict], job: dict) -> list[dict]:
+    """A user-to-LLM run: one row per capture, from the packets with a payload, both ways, on
+    the connection that carried the response. Not every packet to the server's port: the
+    client's /health polls before the prompt would only add the model's start-up time."""
+    done =[r for r in records if not r.get("error")]
+    rows = []
+    for n, record in enumerate(done):
+        job["step"] = f"Measuring captures ({n + 1} of {len(done)})"
+        try:
+            packets = analysis.read_packets(run_dir / "captures" / f"{record['key']}.pcap")
+        except (OSError, ValueError, struct.error):
+            continue
+        stream = analysis._stream(packets)
+        if not stream:
+            continue
+        client = stream[0][2]
+        kept = [p for p in packets if p[3] > 0 and {p[1], p[2]} == {client, analysis.SERVER_PORT}]
+        rows.append({
+            "stem": record["key"], "number": n, "topology": record["variant"], "category": str(record["category"]),
+            "group": int(record["prompt"]),
+            "full": features_from_arrays([p[0] for p in kept], [1 if p[2] == analysis.SERVER_PORT else -1 for p in kept],
+                                         [p[3] for p in kept]),
+            "agents": [],
+        })
+    return rows
+
+
 def _views(rows: list[dict], names: list[str], counts: int, job: dict):
     """For the visibility test: [capture, ordering, visible agents - 1] → feature vector, over
     the captures that have packets attributed to an agent. As in the dataset's analysis, an
@@ -258,24 +289,32 @@ def _folds(rows: list[dict]) -> int:
     return min(FOLDS, min((len(found) for found in tasks.values()), default=0))
 
 
-def compute(run_dir: Path, records: list[dict], variants: list[Variant], link: Link, job: dict) -> dict:
+def compute(run_dir: Path, records: list[dict], variants: list[Variant], link: Link | None, job: dict) -> dict:
+    """`link` None: a user-to-LLM run."""
+    started = time.monotonic()
+    rows = _load(run_dir, records, link, job) if link else _load_prompts(run_dir, records, job)
+    return {**fit(rows, variants, job, agentic=link is not None), "seconds": round(time.monotonic() - started, 1)}
+
+
+def fit(rows: list[dict], variants: list[Variant], job: dict, agentic: bool = True) -> dict:
+    """The forests on rows of _load or _load_prompts: each with its variant ("topology"),
+    category, task or prompt ("group"), features ("full") and, from _load, its agents."""
     import numpy as np
     from sklearn.metrics import balanced_accuracy_score
     from sklearn.model_selection import StratifiedGroupKFold
 
-    started = time.monotonic()
-    rows = _load(run_dir, records, link, job)
+    unit, setting = ("task", "topology") if agentic else ("prompt", "setting the run compares")
     categories = list(dict.fromkeys(r["category"] for r in rows))
     by_topology = {v.key: [r for r in rows if r["topology"] == v.key] for v in variants}
     by_topology = {key: found for key, found in by_topology.items() if found}
     labels = {v.key: v.label for v in variants}
     if len(categories) < 2:
-        return {"status": "too_small", "reason": "A classifier needs completed tasks of at least two categories to tell apart."}
+        return {"status": "too_small", "reason": f"A classifier needs completed {unit}s of at least two categories to tell apart."}
     folds = min((_folds(found) for found in by_topology.values()), default=0)
     if folds < MIN_FOLDS:
         return {"status": "too_small",
-                "reason": f"A classifier is tested on tasks it has not seen, which takes at least {MIN_FOLDS} completed tasks "
-                          f"in every category under every topology ({FOLDS} for the dataset's five folds)."}
+                "reason": f"A classifier is tested on {unit}s it has not seen, which takes at least {MIN_FOLDS} completed {unit}s "
+                          f"in every category under every {setting} ({FOLDS} for the dataset's five folds)."}
 
     names = list(rows[0]["full"])
     X = {key: np.asarray([[r["full"][name] for name in names] for r in found]) for key, found in by_topology.items()}
@@ -364,7 +403,6 @@ def compute(run_dir: Path, records: list[dict], variants: list[Variant], link: L
         "transfer": transfer,
         "importance": importance,
         "visibility": visibility,
-        "seconds": round(time.monotonic() - started, 1),
     }
 
 
@@ -385,7 +423,7 @@ def _key(run_dir: Path, records: list[dict]) -> str:
     return hashlib.sha1(f"{VERSION}|{'|'.join(parts)}".encode()).hexdigest()
 
 
-def _work(run_id: str, run_dir: Path, records: list[dict], variants: list[Variant], link: Link, key: str, job: dict) -> None:
+def _work(run_id: str, run_dir: Path, records: list[dict], variants: list[Variant], link: Link | None, key: str, job: dict) -> None:
     try:
         # Never beside a capture: the forests would take the CPU its timings depend on. A queued
         # run is not capturing yet.
@@ -413,15 +451,17 @@ def _work(run_id: str, run_dir: Path, records: list[dict], variants: list[Varian
             _jobs.pop(run_id, None)
 
 
-def status(run, link: Link) -> dict:
+def status(run, link: Link | None) -> dict:
     """The run's classifier results, or where they are: {"status": "ready", ...} once computed,
     otherwise "running" (the run is not over), "unavailable", "too_small", "failed",
-    "waiting" or "computing" with a `step`."""
+    "waiting" or "computing" with a `step`. `link` None: a user-to-LLM run."""
     if run.status in engine.ACTIVE_STATUSES:
         return {"status": "running", "reason": "The classifier is trained when the run has finished."}
     if problem := missing():
         return {"status": "unavailable", "reason": problem}
-    records = marble_analysis.run_aggregate(run.id, run.run_dir, run.variants, link)["records"]
+    aggregate = (marble_analysis.run_aggregate(run.id, run.run_dir, run.variants, link) if link
+                 else analysis.run_aggregate(run.id, run.run_dir, run.variants))
+    records = aggregate["records"]
     key = _key(run.run_dir, records)
     try:
         cached = json.loads((run.run_dir / "analysis" / "classifier.json").read_text())

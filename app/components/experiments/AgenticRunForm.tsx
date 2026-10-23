@@ -337,7 +337,7 @@ export function AgenticRunForm({ experiment }: { experiment: string }) {
           </dl>
           <div className="space-y-3 border-t border-hairline p-5">
             <Field label="Name" hint="Optional. The run also gets a number (#1, #2, …); you can rename it later.">
-              <input value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder="e.g. Graph and star, 15 tasks" className={inputClass} />
+              <input value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder={`e.g. Graph and star, ${catalog.dataset_tasks} tasks`} className={inputClass} />
             </Field>
             {!system.docker.available && <Alert>{system.docker.error}</Alert>}
             {activeRuns.length > 0 && (
