@@ -7,7 +7,8 @@ the run's own captures. In a user-to-LLM run a prompt plays the task's part and 
 variant (temperature, model, network condition, scenario) the topology's; there are no
 agents, so no visibility test. A user-to-LLM run can also be asked which variant made a
 capture (target "variant": model fingerprinting on a Scalability run), with the same
-forests and the same folds by prompt.
+forests and the same folds by prompt. A Good Agent Bad Agent run with its control can be
+asked whether anyone on the team was bad (target "saboteur"), folds by task.
 
 Each capture becomes 247 measurements of its packets' timing, direction and size
 (features_from_arrays, ported from marble-traffic-dataset's run_incremental_analysis.py).
@@ -43,7 +44,7 @@ from pathlib import Path
 
 from console import console
 
-from . import analysis, engine, marble_analysis
+from . import analysis, engine, good_bad_agents, marble_analysis
 from .base import Link, Variant
 
 VERSION = 2   # 2: per-category results ("confusion")
@@ -297,15 +298,21 @@ def _folds(rows: list[dict]) -> int:
 
 def compute(run_dir: Path, records: list[dict], variants: list[Variant], link: Link | None, job: dict,
             target: str = "category") -> dict:
-    """`link` None: a user-to-LLM run. `target` "variant": which variant made each capture."""
+    """`link` None: a user-to-LLM run. `target` "variant": which variant made each capture; "saboteur": whether
+    anyone on the team was bad, over the captures of `variants` only."""
     started = time.monotonic()
     rows = _load(run_dir, records, link, job) if link else _load_prompts(run_dir, records, job)
     label = "category"
-    if target == "variant":
-        # The variant is the label; every capture in one forest, still tested on prompts it has not seen
+    if target in ("variant", "saboteur"):
+        # The variant (or whether anyone was bad) is the label; every capture in one forest, still tested on tasks or prompts it has not seen
         names = {v.key: v.label for v in variants}
+        rows = [r for r in rows if r["topology"] in names]
         for row in rows:
-            row["category"], row["topology"] = names[row["topology"]], "all"
+            if target == "variant":
+                row["category"] = names[row["topology"]]
+            else:
+                row["category"] = "Nobody bad" if row["topology"] == good_bad_agents.CONTROL else "Someone bad"
+            row["topology"] = "all"
         variants, label = [Variant(key="all", label="All captures", model="")], "compared setting"
     return {**fit(rows, variants, job, agentic=link is not None, label=label), "seconds": round(time.monotonic() - started, 1)}
 
@@ -466,12 +473,18 @@ def _saved(run_dir: Path, target: str) -> dict | None:
     return cached if cached.get("version") == VERSION else None
 
 
-def _targets(run) -> list[str]:
-    """What a run's results page can show: the category, and on a user-to-LLM run comparing several variants, the variant."""
-    return ["category"] + (["variant"] if not run.kind.agentic and len(run.variants) > 1 else [])
+def targets(run) -> list[str]:
+    """What a run's results page can show: the category; on a user-to-LLM run comparing several variants, the
+    variant; on a Good Agent Bad Agent run with its control, whether anyone was bad."""
+    found = ["category"]
+    if not run.kind.agentic and len(run.variants) > 1:
+        found.append("variant")
+    if run.kind.slug == good_bad_agents.KIND.slug and any(v.key == good_bad_agents.CONTROL for v in run.variants):
+        found.append("saboteur")
+    return found
 
 
-def _work(run, link: Link | None, target: str, job: dict) -> None:
+def _work(run, link: Link | None, target: str, job: dict, force: bool = False) -> None:
     try:
         key = None
         try:
@@ -486,10 +499,11 @@ def _work(run, link: Link | None, target: str, job: dict) -> None:
                 records = _records(run, link)
                 key = _key(run.run_dir, records)
                 cached = _saved(run.run_dir, target)
-                if cached and cached.get("key") == key and cached.get("status") != "failed":
+                if not force and cached and cached.get("key") == key and cached.get("status") != "failed":
                     return   # up to date already (asked for every target, only one was missing); a failure is retried
                 console(f"[classifier] {run.id}: training the {target} forests")
-                result = compute(run.run_dir, records, list(run.variants), link, job, target)
+                variants = good_bad_agents.comparable(run.variants) if target == "saboteur" else list(run.variants)
+                result = compute(run.run_dir, records, variants, link, job, target)
         except Exception as e:
             traceback.print_exc()
             result = {"status": "failed", "reason": f"{type(e).__name__}: {e}"}
@@ -508,17 +522,18 @@ def _work(run, link: Link | None, target: str, job: dict) -> None:
             _jobs.pop((run.id, target), None)
 
 
-def start(run) -> None:
-    """Trains every target of a finished run in the background, one run at a time: called when a run
-    completes, and from the results page's Calculate for the runs without results."""
+def start(run, only: str | None = None, force: bool = False) -> None:
+    """Trains every target of a finished run (or `only` that one) in the background, one run at a time: called
+    when a run completes, from the results page's Calculate for the runs without results, and from its
+    Recalculate (`force`: even when the saved results are up to date)."""
     if run.status in engine.ACTIVE_STATUSES or missing():
         return
-    for target in _targets(run):
+    for target in [only] if only else targets(run):
         with _lock:
             if (run.id, target) in _jobs:
                 continue
             job = _jobs[(run.id, target)] = {"status": "waiting", "step": "Starting"}
-        threading.Thread(target=_work, args=(run, run.kind.link, target, job), name=f"classifier-{run.id}-{target}",
+        threading.Thread(target=_work, args=(run, run.kind.link, target, job, force), name=f"classifier-{run.id}-{target}",
                          daemon=True).start()
 
 
@@ -527,7 +542,7 @@ def status(run, link: Link | None, target: str = "category") -> dict:
     otherwise "running" (the run is not over), "unavailable", "missing" (never calculated, or
     its captures changed since: start() calculates it), "too_small", "failed", or "waiting" or
     "computing" with a `step`. `link` None: a user-to-LLM run. `target`: what the forests
-    predict, the "category" or (user-to-LLM runs) the "variant"."""
+    predict, one of targets(run)."""
     if run.status in engine.ACTIVE_STATUSES:
         return {"status": "running", "reason": "The classifier is trained when the run has finished."}
     if problem := missing():

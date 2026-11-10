@@ -9,7 +9,6 @@ import {
   SlidersHorizontal,
   Thermometer,
   Timer,
-  Users,
   VenetianMask,
   Waypoints,
   type LucideIcon,
@@ -55,7 +54,7 @@ export const MAX_VARIANTS = 8;
 // Client to server: the experiments from the repo (2-6), then the one the app adds.
 // Agentic AI (`agentic`): several agents working on a task, one experiment per kind of
 // communication that is captured: with the LLM, with infrastructure, with outside endpoints, with
-// other agents, with people. The coordination topology (graph, star) is an option of each.
+// other agents. The coordination topology (graph, star) is an option of each.
 export const EXPERIMENTS: ExperimentInfo[] = [
   {
     slug: "data-collector",
@@ -254,16 +253,6 @@ export const EXPERIMENTS: ExperimentInfo[] = [
       ["Starting prompts", "What a good agent and what a bad agent is told, after its role in the task. Each agent gets its own in its own container. By default a bad agent keeps messaging and looks helpful while giving plausible wrong facts, flawed code or bad advice."],
       ["Task categories", "The same as Agent to Agents: MARBLE's bug fix, debate, deep research, legal review, medical diagnosis and SWE-bench tasks, 15 each, under the graph topology."],
     ],
-  },
-  // Not in the app yet
-  {
-    slug: "agent-to-people",
-    name: "Agent to People",
-    summary: "One agent, several people",
-    description: "One agent exchanging messages with several people through a chat service.",
-    icon: Users,
-    available: false,
-    agentic: { peer: "chat service", call: { one: "message", many: "messages" } },
   },
 ];
 

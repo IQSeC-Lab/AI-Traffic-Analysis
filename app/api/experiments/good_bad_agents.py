@@ -102,6 +102,16 @@ def team(config: GoodBadConfig, variant: Variant, index: int) -> list[dict]:
              "model": config.models[(seat[agent] + shift) % len(config.models)]} for agent in ids]
 
 
+def comparable(variants: list[Variant]) -> list[Variant]:
+    """The lineups whose agents call the same models as the control's, and the control: telling these apart is
+    telling whether anyone is bad, not which models were called (marble_classifier.py's "saboteur" target).
+    From the variants alone (one lineup per model), so a stored run works too."""
+    lineups = [v for v in variants if v.key != CONTROL]
+    size = int(lineups[0].columns["good"]) + int(lineups[0].columns["bad"])
+    # Lineup 1 seats the models as the control does; the others call the same models only when the team splits evenly over them
+    return (lineups if size % len(lineups) == 0 else lineups[:1]) + [v for v in variants if v.key == CONTROL]
+
+
 def task_config(marble_config: str, config: GoodBadConfig, members: list[dict], output: str) -> str:
     """A MARBLE task config with the team in place of the task's own agents: they take the task's
     roles in turn (a larger team repeats them, a smaller one leaves the last out), each calls its

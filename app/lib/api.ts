@@ -381,7 +381,7 @@ export type AgenticAnalytics = {
 /** An accuracy over the folds of a cross-validation. */
 export type Spread = { mean: number; std: number; values: number[] };
 
-/** Whether the category (or the variant) can be told from a finished run's traffic (api/experiments/marble_classifier.py). */
+/** Whether the category (or the variant, or a saboteur) can be told from a finished run's traffic (api/experiments/marble_classifier.py). */
 export type ClassifierResult =
   // The run is not over, the libraries are missing, it was never calculated (or its captures changed since: POST
   // .../classifier calculates it), the run has too few tasks, or training raised

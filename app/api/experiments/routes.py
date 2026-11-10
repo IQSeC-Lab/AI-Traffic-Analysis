@@ -142,30 +142,39 @@ def make_router(kind: Kind) -> APIRouter:
             }
         return found
 
+    target_query = Literal["category", "variant", "saboteur"]
+    target_help = ('"category": the task\'s or prompt\'s category; "variant": which variant (model, temperature, network '
+                   'condition, scenario) made the capture, user-to-LLM runs; "saboteur": whether anyone on the team was '
+                   "bad, Good Agent Bad Agent runs with their control.")
+
+    def _check_target(run, target: str | None) -> None:
+        if target and target not in (found := marble_classifier.targets(run)):
+            raise HTTPException(400, f"This run's classifier predicts only: {', '.join(found)}.")
+
     @router.get("/runs/{run_id}/classifier")
-    def run_classifier(
-        run_id: str,
-        target: Literal["category", "variant"] = Query(
-            "category", description='"category": the task\'s or prompt\'s category; "variant": which variant (model, '
-                                    "temperature, network condition, scenario) made the capture. User-to-LLM runs only."),
-    ) -> dict:
-        """Whether the task (agentic runs) or prompt category, or the variant, can be told from the run's
-        traffic (marble_classifier.py). Trained in the background once the run has finished: `status` says
+    def run_classifier(run_id: str, target: target_query = Query("category", description=target_help)) -> dict:
+        """Whether the task (agentic runs) or prompt category, the variant, or a saboteur can be told from the
+        run's traffic (marble_classifier.py). Trained in the background once the run has finished: `status` says
         where it is, "ready" with the results."""
-        if kind.agentic and target != "category":
-            raise HTTPException(400, "Agentic runs are classified by task category only.")
-        return marble_classifier.status(_get_run(run_id), kind.link, target)
+        run = _get_run(run_id)
+        _check_target(run, target)
+        return marble_classifier.status(run, kind.link, target)
 
     @router.post("/runs/{run_id}/classifier", status_code=202)
-    def calculate_classifier(run_id: str) -> dict:
-        """Train the run's forests, every target, in the background: for runs without results (saved before
-        the classifier existed, or whose captures changed). Runs that complete are trained on their own."""
+    def calculate_classifier(
+        run_id: str,
+        target: target_query | None = Query(None, description=f"Only this one; every target when left out. {target_help}"),
+        force: bool = Query(False, description="Train again even when the saved results are up to date."),
+    ) -> dict:
+        """Train the run's forests in the background: for runs without results (saved before the classifier
+        existed, or whose captures changed), or again with `force`. Runs that complete are trained on their own."""
         run = _get_run(run_id)
         if run.status in engine.ACTIVE_STATUSES:
             raise HTTPException(409, "The classifier is trained when the run has finished.")
         if problem := marble_classifier.missing():
             raise HTTPException(503, problem)
-        marble_classifier.start(run)
+        _check_target(run, target)
+        marble_classifier.start(run, target, force)
         return {"status": "started"}
 
     @router.get("/runs/{run_id}/captures")

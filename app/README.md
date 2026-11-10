@@ -69,7 +69,7 @@ Open http://localhost:3000. API docs: http://localhost:3000/api/docs.
 
 ## Using it
 
-The sidebar has two sections. **SI Traffic Analysis** lists six experiments, one prompt and its streamed response per capture: the five from the repo (Data Collector, Temperature Change, Custom Prompts, Scalability and Delay) and the Custom Experiment, which you set up yourself. **Agentic SI Analysis** lists the experiments where several agents work on a task, one per kind of communication that is captured: Agent to LLM, Agent to Infrastructure and Agent to Endpoint (see [Agentic SI Analysis](#agentic-si-analysis)). Agent to Agents (agents that run apart from each other) and Agent to People (one agent, several people on a chat service) are listed but not in the app yet.
+The sidebar has two sections. **SI Traffic Analysis** lists six experiments, one prompt and its streamed response per capture: the five from the repo (Data Collector, Temperature Change, Custom Prompts, Scalability and Delay) and the Custom Experiment, which you set up yourself. **Agentic SI Analysis** lists the experiments where several agents work on a task, one per kind of communication that is captured: Agent to LLM, Agent to Infrastructure, Agent to PLC, Agent to Endpoint, Agent to Agents and Good Agent Bad Agent (see [Agentic SI Analysis](#agentic-si-analysis)).
 
 | Page | What it's for |
 | --- | --- |
@@ -137,7 +137,8 @@ Unlike the original, which captured on the host's loopback, the capture is taken
 The classifier is `api/experiments/marble_classifier.py`. The 247 measurements are the dataset's (`features_from_arrays`, ported line for line and checked against the bundle's feature table on the dataset's captures: identical). The forests have the bundle's settings (150 trees, balanced classes) and its folds: five, split by task, so a task's repetitions are never on both sides. Where the bundle spends hours, this is lighter: no hyperparameter search per fold, importances from the five fold forests instead of fifty, three random agent orderings instead of ten, and no sweep over random feature subsets (its accuracy against 3, 6, 10, 50 and 100 features).
 
 - It needs `numpy` and `scikit-learn` (in `api/requirements.txt`). The API runs without them, and the tile says they are missing.
-- It is trained once, when the run has finished, in a background thread, and saved in the run's `analysis/` folder. It waits while any run is capturing, so that training doesn't change the timings being captured.
+- It is trained once, when the run has finished, in a background thread, and saved in the run's `analysis/` folder. It waits while any run is capturing, so that training doesn't change the timings being captured. **Recalculate** on the card trains the shown classifier again, even when its saved results look up to date.
+- On a Good Agent Bad Agent run with its control, a **Saboteur** tab asks instead whether anyone on the team was bad: one forest over the captures, "Someone bad" against "Nobody bad" (chance 50%), still tested on tasks it has not seen. It uses the lineups whose agents call the same models as the control's: all of them when the team splits evenly over the models, otherwise lineup 1 only.
 - It needs at least 3 completed tasks in every category under every topology (5 for the full five folds), and two categories. A smaller run shows why there is no classifier.
 
 **Agent to Infrastructure** captures another of the agents' connections: the one to a database they work on. The agents, the model, the topologies and the Ollama server are the same as in Agent to LLM; what is added (`api/experiments/infra_engine.py`):

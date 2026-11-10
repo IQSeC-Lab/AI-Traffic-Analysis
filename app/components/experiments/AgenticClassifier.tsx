@@ -119,8 +119,11 @@ export function DistributionTile({
   );
 }
 
-/** What the forests predict: the task's or prompt's category, or (user-to-LLM runs) which variant made the capture. */
-export type ClassifierTarget = "category" | "variant";
+/**
+ * What the forests predict: the task's or prompt's category, which variant made the capture (user-to-LLM runs), or
+ * whether anyone on the team was bad (Good Agent Bad Agent runs with their control).
+ */
+export type ClassifierTarget = "category" | "variant" | "saboteur";
 
 const STATE_TITLE: Record<Exclude<ClassifierResult["status"], "ready">, string> = {
   running: "Trained when the run has finished",
@@ -157,7 +160,15 @@ export function ClassifierTiles({
   const whatMany = variable?.many ?? "settings";
   const [target, setTarget] = useState<ClassifierTarget>(targets[0]);
   const byVariant = target === "variant";
-  const title = agentic ? "Task fingerprinting" : byVariant ? `${capital(what)} fingerprinting` : "Prompt fingerprinting";
+  const bySaboteur = target === "saboteur";
+  const oneForest = byVariant || bySaboteur; // one forest over every capture, instead of one per variant
+  const title = bySaboteur
+    ? "Saboteur detection"
+    : agentic
+      ? "Task fingerprinting"
+      : byVariant
+        ? `${capital(what)} fingerprinting`
+        : "Prompt fingerprinting";
   // Per target, so switching back is instant and a late answer never lands under the other one
   const [results, setResults] = useState<Partial<Record<ClassifierTarget, ClassifierResult>>>({});
   const result = results[target];
@@ -177,12 +188,13 @@ export function ClassifierTiles({
   const pending = result?.status === "computing" || result?.status === "waiting";
   useInterval(() => load(target), pending ? 3000 : null);
 
-  // Runs that complete are trained on their own; older ones (and failed trainings) when asked, every target at once
+  // Runs that complete are trained on their own; older ones when asked, every target at once. `force`: this target
+  // again, even when its saved results are up to date
   const [starting, setStarting] = useState(false);
-  const calculate = () => {
+  const calculate = (force: boolean) => {
     setStarting(true);
-    api(base, { method: "POST" })
-      .then(() => all.split(",").forEach((t) => load(t as ClassifierTarget)))
+    api(force ? `${base}?target=${target}&force=true` : base, { method: "POST" })
+      .then(() => (force ? target : all).split(",").forEach((t) => load(t as ClassifierTarget)))
       .catch((e: Error) => setResults((found) => ({ ...found, [target]: { status: "failed", reason: e.message } })))
       .finally(() => setStarting(false));
   };
@@ -198,7 +210,10 @@ export function ClassifierTiles({
             setTarget(t);
             load(t); // what it shows may be a step that has moved on
           }}
-          options={targets.map((t) => ({ value: t, label: t === "variant" ? capital(what) : "Prompt category" }))}
+          options={targets.map((t) => ({
+            value: t,
+            label: t === "variant" ? capital(what) : t === "saboteur" ? "Saboteur" : `${capital(unit)} category`,
+          }))}
         />
       </div>
     ) : null;
@@ -211,21 +226,28 @@ export function ClassifierTiles({
         <div className="col-span-12 rounded-2xl border border-hairline bg-surface p-5 shadow-[0_1px_2px_rgba(0,0,0,0.04)]">
           <div className="text-sm font-semibold">{title}</div>
           <div className="mt-0.5 text-xs text-ink-3">
-            {agentic
-              ? "Whether a classifier can tell the task category from the encrypted traffic alone, on tasks it has not seen."
-              : byVariant
-                ? `Whether a classifier can tell which ${what} made a capture from the sizes and timing of its packets alone, on prompts it has not seen.`
-                : "Whether a classifier can tell a prompt's category from the sizes and timing of its packets alone, on prompts it has not seen."}
+            {bySaboteur
+              ? "Whether a classifier can tell a team with a saboteur from one without, from the encrypted traffic alone, on tasks it has not seen."
+              : agentic
+                ? "Whether a classifier can tell the task category from the encrypted traffic alone, on tasks it has not seen."
+                : byVariant
+                  ? `Whether a classifier can tell which ${what} made a capture from the sizes and timing of its packets alone, on prompts it has not seen.`
+                  : "Whether a classifier can tell a prompt's category from the sizes and timing of its packets alone, on prompts it has not seen."}
           </div>
           <div className="mt-4 flex items-center gap-2 text-sm font-medium">
             {pending && <Spinner />}
             {STATE_TITLE[result.status]}
           </div>
           <p className="mt-1 max-w-3xl text-sm text-ink-2">{"step" in result ? `${result.step}…` : result.reason}</p>
-          {(result.status === "missing" || result.status === "failed") && (
-            <button type="button" onClick={calculate} disabled={starting} className={`mt-4 ${buttonClass("primary", "sm")}`}>
+          {(result.status === "missing" || result.status === "failed" || result.status === "too_small") && (
+            <button
+              type="button"
+              onClick={() => calculate(result.status !== "missing")}
+              disabled={starting}
+              className={`mt-4 ${buttonClass("primary", "sm")}`}
+            >
               {starting && <Spinner />}
-              {result.status === "failed" ? "Calculate again" : "Calculate"}
+              {result.status === "missing" ? "Calculate" : "Calculate again"}
             </button>
           )}
         </div>
@@ -239,7 +261,7 @@ export function ClassifierTiles({
 
   // Trained on each topology: tested on its own held-out tasks, and on the same tasks under the other topologies
   const trained = [...new Set(result.transfer.map((t) => t.train))];
-  const same = variable && !byVariant ? `Same ${variable.one}` : `Held-out ${unit}s`;
+  const same = variable && !oneForest ? `Same ${variable.one}` : `Held-out ${unit}s`;
   // Telling the variants apart is one forest over all of them
   const forestLabel = (label: string) => (byVariant ? `All ${whatMany}` : label);
   const conditions = result.transfer.some((t) => !t.within) ? [same, `Another ${variable?.one}`] : [same];
@@ -251,7 +273,7 @@ export function ClassifierTiles({
     const mean = (values: number[]) => (values.length ? values.reduce((a, b) => a + b, 0) / values.length : null);
     return {
       id: key,
-      label: byVariant ? forestLabel(mine[0].train_label) : `Trained on ${mine[0].train_label}`,
+      label: oneForest ? forestLabel(mine[0].train_label) : `Trained on ${mine[0].train_label}`,
       color: colorOf(key),
       values: cells.map((found) => mean(found.map((t) => t.mean))),
       spreads: cells.map((found) => mean(found.map((t) => t.std))),
@@ -267,7 +289,8 @@ export function ClassifierTiles({
     const confused = mistaken !== i && row[mistaken] > 0 ? result.categories[mistaken] : null;
     return { name, total, recognized: total ? row[i] / total : null, mistaken: confused, share: total ? row[mistaken] / total : 0 };
   });
-  const thing = byVariant ? what : "category";
+  const thing = byVariant ? what : bySaboteur ? "team" : "category";
+  const totalCaptures = Object.values(result.captures).reduce((a, b) => a + b, 0);
 
   const agentCounts = [...new Set(result.visibility.flatMap((v) => v.counts.map((c) => c.agents)))].sort((a, b) => a - b);
   const visibilitySeries = result.visibility.map((v) => ({
@@ -283,21 +306,29 @@ export function ClassifierTiles({
       {picker}
       <ChartCard
         title={title}
-        subtitle={`Balanced accuracy of a Random Forest predicting the ${byVariant ? what : `${unit} category`} from ${result.features} measurements of a capture's packets, tested on ${unit}s it has not seen (${setup}). Whiskers: one standard deviation over the folds.`}
+        subtitle={`Balanced accuracy of a Random Forest predicting ${bySaboteur ? "whether anyone on the team was bad" : `the ${byVariant ? what : `${unit} category`}`} from ${result.features} measurements of a capture's packets, tested on ${unit}s it has not seen (${setup}). Whiskers: one standard deviation over the folds.`}
         legend={transferSeries}
         legendShape="rect"
         height={240}
         className={agentic || single ? "col-span-5" : "col-span-12"}
+        controls={
+          <button type="button" onClick={() => calculate(true)} disabled={starting} className={buttonClass("secondary", "sm")}>
+            {starting && <Spinner />}
+            Recalculate
+          </button>
+        }
         table={{
           columns: ["Trained on", "Tested on", "Accuracy", "Std. deviation", "Per fold"],
           rows: result.transfer.map((t) => [forestLabel(t.train_label), forestLabel(t.test_label), percent1(t.mean), percent1(t.std), t.values.map(percent).join(", ")]),
         }}
         footer={
-          byVariant
-            ? `${result.tasks} prompts, ${result.categories.length} ${whatMany}, ${Object.values(result.captures).reduce((a, b) => a + b, 0)} captures. Trained in ${formatNumber(result.seconds)} s.`
-            : `${result.tasks} ${unit}s in ${result.categories.length} categories, ${Object.entries(result.captures)
-                .map(([label, n]) => `${n} captures under ${label}`)
-                .join(" and ")}. Trained in ${formatNumber(result.seconds)} s.`
+          bySaboteur
+            ? `${result.tasks} ${unit}s, ${totalCaptures} captures: ${perCategory.map((c) => `${c.total} with ${c.name.toLowerCase()}`).join(" and ")}. Trained in ${formatNumber(result.seconds)} s.`
+            : byVariant
+              ? `${result.tasks} prompts, ${result.categories.length} ${whatMany}, ${totalCaptures} captures. Trained in ${formatNumber(result.seconds)} s.`
+              : `${result.tasks} ${unit}s in ${result.categories.length} categories, ${Object.entries(result.captures)
+                  .map(([label, n]) => `${n} captures under ${label}`)
+                  .join(" and ")}. Trained in ${formatNumber(result.seconds)} s.`
         }
       >
         <GroupedColumns
@@ -308,14 +339,44 @@ export function ClassifierTiles({
           reference={chance}
           height={240}
           ariaLabel={
-            byVariant
-              ? `Balanced accuracy telling the ${whatMany} apart on held-out prompts`
-              : variable
-                ? `Balanced accuracy within and across ${variable.many}`
-                : `Balanced accuracy on held-out ${unit}s`
+            bySaboteur
+              ? "Balanced accuracy telling a team with a saboteur from one without on held-out tasks"
+              : byVariant
+                ? `Balanced accuracy telling the ${whatMany} apart on held-out prompts`
+                : variable
+                  ? `Balanced accuracy within and across ${variable.many}`
+                  : `Balanced accuracy on held-out ${unit}s`
           }
         />
       </ChartCard>
+
+      {agentic && <ChartCard
+        title="Agent visibility"
+        subtitle={`The same accuracy when only some agents' packets are seen: that many agents picked at random in each task (${result.orderings} draws), trained and tested on that view.`}
+        legend={visibilitySeries}
+        legendShape="rect"
+        height={240}
+        className="col-span-7"
+        table={{
+          columns: ["Topology", "Agents seen", "Seen on average", "Accuracy", "Std. deviation"],
+          rows: result.visibility.flatMap((v) => v.counts.map((c) => [v.label, c.agents, formatNumber(c.visible), percent1(c.mean), percent1(c.std)])),
+        }}
+        footer="A task with fewer agents than the number asked for shows all of its agents. Packets outside every agent's calls are never seen."
+      >
+        {visibilitySeries.length > 0 ? (
+          <GroupedColumns
+            categories={agentCounts.map((k) => `${k} agent${k === 1 ? "" : "s"}`)}
+            series={visibilitySeries}
+            format={percent}
+            max={1}
+            reference={chance}
+            height={240}
+            ariaLabel="Balanced accuracy by number of agents seen"
+          />
+        ) : (
+          <div className="flex h-60 items-center justify-center text-sm text-ink-3">No packets could be attributed to an agent in this run.</div>
+        )}
+      </ChartCard>}
 
       <ChartCard
         title={`Recognized per ${thing}`}
@@ -349,41 +410,13 @@ export function ClassifierTiles({
         />
       </ChartCard>
 
-      {agentic && <ChartCard
-        title="Agent visibility"
-        subtitle={`The same accuracy when only some agents' packets are seen: that many agents picked at random in each task (${result.orderings} draws), trained and tested on that view.`}
-        legend={visibilitySeries}
-        legendShape="rect"
-        height={240}
-        className="col-span-7"
-        table={{
-          columns: ["Topology", "Agents seen", "Seen on average", "Accuracy", "Std. deviation"],
-          rows: result.visibility.flatMap((v) => v.counts.map((c) => [v.label, c.agents, formatNumber(c.visible), percent1(c.mean), percent1(c.std)])),
-        }}
-        footer="A task with fewer agents than the number asked for shows all of its agents. Packets outside every agent's calls are never seen."
-      >
-        {visibilitySeries.length > 0 ? (
-          <GroupedColumns
-            categories={agentCounts.map((k) => `${k} agent${k === 1 ? "" : "s"}`)}
-            series={visibilitySeries}
-            format={percent}
-            max={1}
-            reference={chance}
-            height={240}
-            ariaLabel="Balanced accuracy by number of agents seen"
-          />
-        ) : (
-          <div className="flex h-60 items-center justify-center text-sm text-ink-3">No packets could be attributed to an agent in this run.</div>
-        )}
-      </ChartCard>}
-
       <ChartCard
         title="What the classifier relies on"
-        subtitle={`The ten measurements, of ${result.features}, that the forests lean on most${variable && !byVariant ? ` under each ${variable.one}` : ""}: their share of the forests' decisions (mean decrease in impurity), averaged over the folds.${agentic || byVariant ? "" : " Outgoing packets are the request, so their sizes follow the prompt's length."}`}
+        subtitle={`The ten measurements, of ${result.features}, that the forests lean on most${variable && !oneForest ? ` under each ${variable.one}` : ""}: their share of the forests' decisions (mean decrease in impurity), averaged over the folds.${agentic || byVariant ? "" : " Outgoing packets are the request, so their sizes follow the prompt's length."}`}
         height={300}
         className="col-span-12"
         table={{
-          columns: [byVariant ? "Trained on" : variable ? capital(variable.one) : "Model", "Rank", "Measurement", "Importance", "Lowest fold", "Highest fold"],
+          columns: [oneForest ? "Trained on" : variable ? capital(variable.one) : "Model", "Rank", "Measurement", "Importance", "Lowest fold", "Highest fold"],
           rows: result.importance.flatMap((t) => t.features.map((f, i) => [forestLabel(t.label), i + 1, f.name, percent1(f.mean), percent1(f.min), percent1(f.max)])),
         }}
       >

@@ -162,7 +162,13 @@ export function AgenticResults({ run, live }: { run: Run; live: boolean }) {
         <CompareChart data={data} series={series} variable={variable} metrics={METRICS} height={200} className="col-span-8" />
         <HeatmapTile heatmap={data.heatmap} className="col-span-12" />
         <DistributionTile captures={captures} series={series} callLabel={capital(info.call.many)} className="col-span-12" />
-        <ClassifierTiles run={run} series={series} live={live} />
+        <ClassifierTiles
+          run={run}
+          series={series}
+          live={live}
+          // A Good Agent Bad Agent run with its control can also be asked whether anyone was bad (marble_classifier.targets)
+          targets={run.experiment === "good-agent-bad-agent" && run.variants.some((v) => v.key === "control") ? ["saboteur", "category"] : undefined}
+        />
         <GapChart
           data={data}
           series={series}
